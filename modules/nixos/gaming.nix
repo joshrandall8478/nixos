@@ -288,10 +288,20 @@ let
   #     fallen off its fast route, which is the regression in
   #     nixpkgs#524342 and the sway thread it links to.
   #
+  # The last two sections answer a different question — "why does the pad not
+  # move the cursor" — and they are here rather than in a command of their own
+  # because the answer is assembled from places nobody remembers the paths to:
+  # /proc/bus/input/devices, every hidraw device's uevent and driver link
+  # under /sys, the open file descriptors of every process this user owns,
+  # /dev/uinput's permissions, and the environment of the *running* Steam.
+  # See `local.gaming.steamInputOnWayland` in modules/nixos/options.nix for
+  # what each of them means. With two generations of Steam Controller on one
+  # machine the table is also the only thing that says which pad is which.
+  #
   # Every probe here is allowed to find nothing: no card, no model server, no
-  # niri session. writeShellApplication runs this under `set -e`, so each one
-  # ends in `|| true` — a diagnostic that stops at the first absent thing is
-  # worse than no diagnostic.
+  # niri session, no controller. writeShellApplication runs this under
+  # `set -e`, so each one ends in `|| true` — a diagnostic that stops at the
+  # first absent thing is worse than no diagnostic.
   gamingDoctor = pkgs.writeShellApplication {
     name = "gaming-doctor";
 
@@ -301,6 +311,7 @@ let
         coreutils
         curl
         gamemode # gamemoded --status
+        gawk # the controller table
         gnugrep
         jq
         libnotify # the one finding worth leaving the terminal for
@@ -427,6 +438,162 @@ let
       else
         echo "not a niri session, or not run from inside one"
       fi
+
+      # --- the controller, which is a different question -----------------
+      #
+      # Everything above answers "why is it slow". The two sections below
+      # answer "why does the pad not move the cursor", which is the other
+      # thing that gets typed into a search box at eleven at night.
+      #
+      # Read them in order. The kernel has to see the pad; something has to
+      # have claimed it, or not, and which is which matters; /dev/uinput has
+      # to be writable; the preload has to be in the *running* Steam; and
+      # only then does the absence of the fake device mean anything.
+
+      section "controllers"
+      # Every input device whose name looks like a pad, with the event and
+      # js nodes it owns. A pad missing from this list is a cable, a battery
+      # or a udev rule, and nothing further down applies.
+      devices=$(gawk '
+        /^N: Name=/ {
+          name = substr($0, 10)
+          gsub(/"/, "", name)
+        }
+        /^H: Handlers=/ {
+          handlers = substr($0, 13)
+          key = tolower(name)
+          if (key ~ /steam|controller|gamepad|joystick|extest|x-?box|dualsense|dualshock/)
+            printf "  %-38s %s\n", name, handlers
+        }
+      ' /proc/bus/input/devices 2>/dev/null) || devices=""
+      if [ -n "$devices" ]; then
+        echo "$devices"
+      else
+        echo "nothing controller-shaped is connected, or no driver has bound to it"
+      fi
+
+      # --- every Valve HID device, its driver, and who has it open --------
+      #
+      # This is the table that matters when there is more than one pad on the
+      # machine, because the two generations behave differently in a way
+      # nothing else here would show.
+      #
+      # The product id says which pad a line is. 1102 is the wired 2015 Steam
+      # Controller, 1142 its wireless dongle, 1205 a Steam Deck, and 1304 the
+      # 2026 controller (which enumerates as "Steam Controller Puck").
+      #
+      # The driver column is the difference. hid-steam's device table is those
+      # first three ids and nothing else — `steam_controllers[]` in
+      # drivers/hid/hid-steam.c — so a 2015 pad gets a kernel driver that owns
+      # its lizard mode, enabling the firmware's mouse-and-keyboard emulation
+      # when nothing holds the device and disabling it the moment a hidraw
+      # client opens one (`steam_input_open`). The 2026 pad falls through to
+      # hid-generic: its lizard mode is the firmware's own decision, the
+      # kernel is not managing it, and there is no kernel-side path that puts
+      # it back.
+      #
+      # And the last column is the fact that explains a dead cursor. Lizard
+      # mode ends when something opens the hidraw node; `steam` in that column
+      # is therefore Steam having taken the pad, which is correct and wanted —
+      # it is what Steam Input's layouts require — and also why everything in
+      # the next section has to work.
+      valve=""
+      for dev in /sys/class/hidraw/hidraw*; do
+        [ -e "$dev/device/uevent" ] || continue
+        # HID_ID=0003:000028DE:00001102 — bus, vendor, product, each padded.
+        hid_id=$(gawk -F= '$1 == "HID_ID" { print $2 }' "$dev/device/uevent") || continue
+        case "$hid_id" in *:000028DE:*) ;; *) continue ;; esac
+
+        node=''${dev##*/}
+        product=$(printf '%s' "$hid_id" | gawk -F: '{ print substr($3, 5) }')
+        hid_name=$(gawk -F= '$1 == "HID_NAME" { print $2 }' "$dev/device/uevent") || hid_name="?"
+
+        # The driver is a symlink; no driver at all is a device nothing has
+        # claimed, which is itself worth seeing.
+        drv=$(readlink "$dev/device/driver" 2>/dev/null) || drv=""
+        [ -n "$drv" ] || drv="(none)"
+        drv=''${drv##*/}
+
+        valve="$valve$node|$product|$drv|$hid_name
+"
+      done
+
+      if [ -z "$valve" ]; then
+        echo "  no Valve HID devices — no pad is connected"
+      else
+        # One pass over /proc rather than one per device. Only this user's
+        # processes are readable, which is the right set: Steam runs as the
+        # person sitting here.
+        holders=""
+        for link in /proc/[0-9]*/fd/*; do
+          target=$(readlink "$link" 2>/dev/null) || continue
+          case "$target" in /dev/hidraw*) ;; *) continue ;; esac
+          pid=''${link#/proc/}
+          pid=''${pid%%/*}
+          comm=$(cat "/proc/$pid/comm" 2>/dev/null) || comm="?"
+          holders="$holders''${target##*/} $comm($pid)
+"
+        done
+
+        printf '  %-8s %-7s %-12s %s\n' node product driver "open by"
+        while IFS='|' read -r node product drv hid_name; do
+          [ -n "$node" ] || continue
+          who=$(printf '%s' "$holders" | gawk -v n="$node" '$1 == n { print $2 }' \
+            | sort -u | tr '\n' ' ')
+          [ -n "$who" ] || who="-"
+          printf '  %-8s %-7s %-12s %s\n' "$node" "$product" "$drv" "$who"
+          printf '           %s\n' "$hid_name"
+        done <<< "$valve"
+      fi
+
+      section "steam input on wayland"
+      # What the configuration says, so the run-time answers below have
+      # something to disagree with. See local.gaming.steamInputOnWayland.
+      echo "programs.steam.extest.enable = ${lib.boolToString config.programs.steam.extest.enable}"
+
+      # extest writes through this node, and the ACL on it is what udev's
+      # `uaccess` tag grants whoever is logged in at the seat.
+      if [ -e /dev/uinput ]; then
+        ls -l /dev/uinput
+        if [ -w /dev/uinput ]; then
+          echo "  writable by $(id -un)"
+        else
+          echo "  NOT writable by $(id -un) — extest cannot create its device"
+        fi
+      else
+        echo "/dev/uinput missing — hardware.steam-hardware.enable is what loads the module"
+      fi
+
+      # And whether the Steam that is actually running has the preload. This
+      # is the one that disagrees with the line above in practice: a Steam
+      # started from a Flatpak, from a stale desktop entry, or from a shell
+      # that predates the rebuild is a Steam the wrapper never wrapped.
+      steam_pid=$(pgrep -x steam | head -n1) || steam_pid=""
+      if [ -z "$steam_pid" ]; then
+        echo "steam is not running — start it to check the preload"
+      else
+        preload=$(tr '\0' '\n' < "/proc/$steam_pid/environ" | grep '^LD_PRELOAD=' || true)
+        if [ -n "$preload" ]; then
+          echo "steam pid $steam_pid: $preload"
+        else
+          echo "steam pid $steam_pid has no LD_PRELOAD — extest is not loaded into it"
+        fi
+      fi
+
+      # The proof, and the one line worth reading twice.
+      #
+      # extest names its uinput device "extest fake device" and creates it the
+      # first time Steam asks XTEST to move something. Present means the
+      # translation is working and a cursor that still does not move is a
+      # Steam-side problem — see the 2026 controller's registration bug in
+      # local.gaming.steamInputOnWayland. Absent with everything above green
+      # means Steam has not driven a mouse yet: open the Desktop Layout, move
+      # the pad, and look again.
+      if grep -q 'extest fake device' /proc/bus/input/devices 2>/dev/null; then
+        echo "extest fake device: present — XTEST is reaching the real pointer"
+      else
+        echo "extest fake device: absent — nothing has asked XTEST for pointer motion yet"
+      fi
     '';
   };
 in
@@ -452,7 +619,48 @@ in
   programs.steam = {
     enable = true;
     remotePlay.openFirewall = true;
+
+    # The controller's pointer, in a session that has no X server to fake one
+    # in.
+    #
+    # Steam's desktop-level mouse emulation — the Desktop Layout, the Big
+    # Picture cursor, the guide-button chord that turns a pad into a mouse —
+    # is written against the X11 XTEST extension, which asks the X server to
+    # pretend a device did something. There is no such server here: Steam is
+    # an Xwayland client, so XTEST moves Xwayland's private idea of the
+    # pointer and the compositor, which draws the cursor and routes the click,
+    # never hears about it. That is the "second, invisible cursor" — X11
+    # windows follow the phantom, everything else ignores it, and the pointer
+    # on screen does not move.
+    #
+    # extest replaces those XTEST entry points at load time and drives a
+    # /dev/uinput device instead, which the kernel and therefore the
+    # compositor treat as a real mouse. nixpkgs puts the 32-bit build in
+    # Steam's own `LD_PRELOAD`, so it reaches Steam and its children and
+    # nothing else.
+    #
+    # Not niri-specific, which is why it is here rather than in the niri
+    # module: `gamestation` is a Plasma **Wayland** session and has exactly
+    # the same problem. See `local.gaming.steamInputOnWayland` in
+    # modules/nixos/options.nix for what it needs from udev and what it does
+    # not fix, and `gaming-doctor` for whether it actually ended up loaded.
+    extest.enable = config.local.gaming.steamInputOnWayland;
   };
+
+  # Stop the kernel from sleeping a thread that does a split lock.
+  #
+  # The detector stays on and still logs; what this turns off is the penalty
+  # — the forced sleep, serialised behind a global semaphore — that lands on
+  # the render thread of a Proton game whose hot path does unaligned atomics.
+  # It is a burst-hitching symptom that reads as a GPU problem and isn't one,
+  # and Linux 6.2 gained this sysctl because of how many games hit it.
+  #
+  # `local.gaming.splitLockMitigate` is the way back to the kernel default,
+  # and its description is the longer version of why the default here is the
+  # other one. On a CPU without split-lock or bus-lock detection the file does
+  # not exist and systemd-sysctl says it skipped it.
+  boot.kernel.sysctl."kernel.split_lock_mitigate" =
+    if config.local.gaming.splitLockMitigate then 1 else 0;
 
   programs.gamescope = {
     enable = true;

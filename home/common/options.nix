@@ -248,7 +248,46 @@
             description = ''Rotation: "90", "180", "270", "flipped", etc.'';
           };
 
-          variableRefreshRate = lib.mkEnableOption "VRR / adaptive sync on this output";
+          variableRefreshRate = lib.mkOption {
+            type = lib.types.enum [
+              false
+              true
+              "on-demand"
+            ];
+            default = false;
+            example = "on-demand";
+            description = ''
+              VRR / adaptive sync on this output — FreeSync, G-Sync, or
+              whatever the panel calls it.
+
+              With VRR the display waits for the frame instead of the frame
+              waiting for the display, which is the difference between a game
+              whose frame rate wanders and a game that visibly judders while
+              it does. A fixed 180 Hz panel shows each frame for a whole
+              multiple of 5.6ms, so a frame that took 7ms is shown for 11.2
+              and the hitch is the *display*, not the game. That is the
+              stutter this removes, and it is the only kind it removes:
+              nothing here helps a frame that took 40ms to render.
+
+              `"on-demand"` is the setting worth having, and it is not a
+              weaker version of `true`. It leaves the output at its fixed
+              rate for the desktop and turns VRR on only while a window
+              carrying the `variable-refresh-rate` window rule is displayed
+              on it — the games rule in home/joshr/niri/niri.nix. That
+              matters because a desktop under VRR is a display whose refresh
+              rate tracks how much the shell happens to be animating, which
+              on some panels is visible as brightness flicker in dark areas,
+              and because it is the one setting that cannot make anything
+              worse when nobody is playing anything.
+
+              `true` holds VRR on permanently, which is what to use if the
+              panel is well behaved and you would rather not think about it.
+
+              A panel that doesn't support VRR takes any of these and stays
+              fixed; niri logs it and carries on. `niri msg outputs` says
+              which mode is actually in use.
+            '';
+          };
 
           focusAtStartup = lib.mkEnableOption ''
             starting the session focused on this output.

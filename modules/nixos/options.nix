@@ -987,6 +987,119 @@
 
   # Gaming — modules/nixos/gaming.nix. "Gaming performance" in MANUAL.md is
   # the prose version, including how to tell the failure modes apart.
+  options.local.gaming.steamInputOnWayland = lib.mkOption {
+    type = lib.types.bool;
+    default = true;
+    description = ''
+      Give Steam Input a way to move the *real* pointer in a Wayland session,
+      by preloading extest into Steam.
+
+      This is the fix for the one symptom that makes a controller look broken
+      rather than unconfigured: the trackpad or stick moves something, the
+      Steam UI reacts to it, and the cursor on screen never goes anywhere.
+      There are two pointers, and only one of them is drawn.
+
+      Steam is an X11 program. Its desktop-level mouse emulation — the
+      Desktop Layout, the Big Picture cursor, the chord that turns the right
+      pad into a mouse — is implemented with the X11 XTEST extension, which
+      is a request to the X server to *pretend* an input device did
+      something. Under a Wayland session there is no X server that owns the
+      pointer: Steam is an Xwayland client, XTEST moves Xwayland's own idea of
+      where the cursor is, and the compositor — which draws the cursor and
+      decides which surface gets the click — is never told. X11 windows react
+      to the phantom, Wayland windows ignore it entirely, and nothing moves.
+
+      extest is a small library that replaces those XTEST entry points at load
+      time and, instead of asking an X server for a fake event, creates a
+      virtual input device through /dev/uinput and moves *that*. A uinput
+      device is a real device as far as the kernel and the compositor are
+      concerned, so the cursor it drives is the one on screen, over every
+      window, X11 or Wayland or the shell's own panels.
+
+      `programs.steam.extest.enable` is what this switches on; nixpkgs sets
+      `LD_PRELOAD` to the 32-bit build in Steam's own environment, so it
+      reaches Steam and the game processes it starts and nothing else on the
+      machine. Two things it needs are already true here and worth knowing
+      about, because they are what breaks first: `/dev/uinput` has to exist
+      and be writable, which `hardware.steam-hardware.enable` arranges (it
+      loads the uinput module and installs Valve's udev rules, which tag the
+      node `uaccess` so the logged-in user gets an ACL on it), and every
+      interactive account here is in the `input` group as a second route to
+      the same permission. `gaming-doctor` prints all of it.
+
+      The cost is a line of noise. The preload is a 32-bit library because
+      Steam is a 32-bit program, so every 64-bit process Steam starts — which
+      is most games — has the dynamic linker print `ERROR: ld.so: object
+      libextest.so ... cannot be preloaded ... ignored` and carry on. It is
+      ugly and it is harmless.
+
+      This covers both generations of the controller, because both reach the
+      pointer the same way. It does not cover a pad Steam never drives at
+      all, and the 2026 controller has a Valve-side bug that can put it in
+      that state — Steam misidentifies it as Steam Deck hardware and its
+      registration fails
+      (https://github.com/ValveSoftware/steam-for-linux/issues/13185). The
+      tell is that with extest loaded there is still no `extest fake device`
+      in /proc/bus/input/devices after moving the pad: no XTEST is being
+      issued, so there is nothing to translate.
+
+      The way out of that one is Steam's own settings rather than anything
+      here — turning Steam Input off for that controller stops Steam claiming
+      the hidraw node, and the pad falls back to its firmware's lizard mode,
+      where it is a plain USB mouse and keyboard and no compositor has an
+      opinion about it. It costs that pad its gamepad, which is not a small
+      thing: `hid-steam`'s device table is the 2015 controller, its dongle and
+      the Steam Deck (`steam_controllers[]` in drivers/hid/hid-steam.c), so
+      the 2026 pad has no kernel driver to synthesise one and Steam's virtual
+      gamepad is the only one it ever had. The 2015 pad is not in that
+      position — the kernel driver restores its lizard mode by itself as soon
+      as Steam lets go.
+
+      There is no option here for taking the hidraw node away from Steam in
+      udev instead. It would work, and it would trade a pad's whole purpose
+      for its pointer — a decision that belongs in a settings panel where it
+      can be undone in a second, not in a rebuild.
+
+      `gaming-doctor` prints the table this is all read from: every Valve HID
+      device, its product id, which driver claimed it, and which process has
+      its hidraw node open.
+    '';
+  };
+
+  options.local.gaming.splitLockMitigate = lib.mkOption {
+    type = lib.types.bool;
+    default = false;
+    description = ''
+      Leave the kernel's split-lock "misery mode" on.
+
+      A split lock is an atomic instruction whose operand straddles two cache
+      lines. The CPU can only do it by locking the whole memory bus for the
+      duration, which stalls every other core, so the kernel detects them and
+      — by default — punishes the offending thread: it is forced to sleep,
+      and the check is serialised behind a global semaphore so only one such
+      thread runs at a time. That is the misery mode, and the name is
+      upstream's own.
+
+      It is the right default for a shared machine and the wrong one for this
+      one. Plenty of Windows games do split locks in their hot path, and under
+      Proton the penalty lands on the render thread: the game does not fail,
+      it hitches, in bursts, in a way that looks exactly like a GPU problem
+      and is not one. It was widely enough hit that Linux 6.2 gained
+      `kernel.split_lock_mitigate` specifically so it could be turned off
+      (https://www.phoronix.com/news/Linux-Splitlock-Hurts-Gaming).
+
+      Off, the kernel still detects split locks and still logs them — it just
+      stops sleeping the thread that did one. What is given up is protection
+      against a local program degrading the machine for everything else by
+      doing them deliberately, which is a real consideration on a shared
+      server and not one here.
+
+      True restores the kernel default. On a CPU with no split-lock or
+      bus-lock detection the sysctl does not exist and systemd-sysctl logs
+      that it skipped it, either way.
+    '';
+  };
+
   options.local.gaming.releaseGpuOnGameMode = lib.mkOption {
     type = lib.types.bool;
     default = true;

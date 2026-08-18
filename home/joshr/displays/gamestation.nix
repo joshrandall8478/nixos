@@ -31,6 +31,28 @@
         x = 0;
         y = 0;
       };
+
+      # VRR, but only while a game is on this display.
+      #
+      # A fixed 180Hz panel can only show a frame for a whole multiple of
+      # 5.6ms, so a frame that took 7ms to render is held for 11.2 and the
+      # judder you see is the display rather than the game. VRR removes that
+      # by making the panel wait for the frame instead.
+      #
+      # "on-demand" rather than `true` so the desktop keeps its fixed rate:
+      # the output only switches while a window carrying the
+      # `variable-refresh-rate` window rule is on it, and the only rule that
+      # sets it is the games one in home/joshr/niri/niri.nix. That keeps the
+      # panel out of the case where its refresh rate tracks how much the
+      # shell happens to be animating, which on some displays shows up as
+      # brightness flicker in dark areas.
+      #
+      # If this panel turns out not to support adaptive sync, nothing here
+      # breaks — niri logs it and leaves the output fixed. `niri msg outputs`
+      # says which it actually did. Set it to `false` to take it out
+      # entirely, or `true` to hold VRR on for the desktop as well.
+      variableRefreshRate = "on-demand";
+
       # niri has no "primary" display; this is the nearest equivalent — the
       # session starts focused here. To also pin workspaces to this output,
       # give them an `open-on-output` in the workspace declarations in

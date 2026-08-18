@@ -16,6 +16,8 @@ let
   renderOutput =
     o:
     let
+      vrr = o.variableRefreshRate;
+
       lines =
         lib.optional o.off "off"
         ++ lib.optional (o.mode != null) ''mode "${o.mode}"''
@@ -28,7 +30,12 @@ let
         ++ lib.optional (o.transform != null) ''transform "${o.transform}"''
         ++ lib.optional (o.position != null)
           "position x=${toString o.position.x} y=${toString o.position.y}"
-        ++ lib.optional o.variableRefreshRate "variable-refresh-rate"
+        # Three states, two of which produce a line. See the option in
+        # home/common/options.nix: "on-demand" leaves the output fixed until a
+        # window carrying the `variable-refresh-rate` window rule is on it,
+        # which here means a game and nothing else.
+        ++ lib.optional (vrr == true) "variable-refresh-rate"
+        ++ lib.optional (vrr == "on-demand") "variable-refresh-rate on-demand=true"
         ++ lib.optional o.focusAtStartup "focus-at-startup";
     in
     ''
@@ -553,6 +560,16 @@ ${workspaceBlocks}
 
     // Games and video players: no rounding, no shadow, and don't let the
     // screen blank on them.
+    //
+    // The rounding is not only cosmetic here. A corner radius makes the
+    // surface non-rectangular, so the compositor has to composite it instead
+    // of handing the buffer straight to the display controller — and direct
+    // scanout, which is what that hand-off is called, is the difference
+    // between a fullscreen game costing niri a full-screen blend every frame
+    // and costing it nothing. Same for the shadow. That is why these three
+    // properties come *after* the rounded-corners-everywhere rule above
+    // rather than before it: niri applies matching rules in order and the
+    // last one to set a property wins.
     window-rule {
         match app-id=r#"^steam_app_"#
         match app-id=r#"^gamescope$"#
@@ -560,6 +577,28 @@ ${workspaceBlocks}
         geometry-corner-radius 0
         clip-to-geometry false
         shadow { off; }
+    }
+
+    // Games, and VRR.
+    //
+    // This is the other half of `variableRefreshRate = "on-demand"` on an
+    // output (home/joshr/displays/gamestation.nix). On-demand VRR does
+    // nothing at all by itself: the output stays at its fixed rate until a
+    // window carrying this property is displayed on it, at which point the
+    // panel starts waiting for frames instead of the frames waiting for the
+    // panel. A game whose frame rate wanders — which is every game — stops
+    // being shown in whole multiples of the refresh interval, and the judder
+    // that comes from that goes away.
+    //
+    // Deliberately narrower than the rule above. mpv is the example upstream
+    // uses for this property and it is a reasonable thing to want, but it is
+    // also the case where a panel that flickers under VRR would do it during
+    // a film with a dark scene, so video is left out of it and the on-demand
+    // switch stays a thing that only games flip.
+    window-rule {
+        match app-id=r#"^steam_app_"#
+        match app-id=r#"^gamescope$"#
+        variable-refresh-rate true
     }
 
     // Blank the lock screen's own surface out of screencasts.
