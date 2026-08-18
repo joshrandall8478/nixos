@@ -74,6 +74,7 @@ the machine.
   - [The driver](#the-driver)
   - [The kernel](#the-kernel)
   - [Would Hyprland be better?](#would-hyprland-be-better)
+  - [Would sway be better?](#would-sway-be-better)
 - [Single GPU passthrough](#single-gpu-passthrough)
   - [What it costs](#what-it-costs)
   - [Turning it on](#turning-it-on)
@@ -4399,6 +4400,35 @@ sawtooth, and turning off animations will not un-evict video memory — this is
 a few percent of frame time and some GPU contention, where the next three
 sections are the difference between a game running and a game falling over.
 
+**The largest of these is not a setting you toggle — it is a window rule not
+to break.** A fullscreen game's buffer can go straight to the display
+controller without niri blending anything, which is called direct scanout and
+which costs the compositor nothing at all. Two things disqualify a surface from
+it: a corner radius, because that makes the surface non-rectangular, and a
+shadow, because that makes it non-opaque. The session rounds every window by
+default, so there is a second rule after that one putting both back for games:
+
+```kdl
+window-rule {
+    match app-id=r#"^steam_app_"#
+    match app-id=r#"^gamescope$"#
+    match app-id=r#"^mpv$"#
+    geometry-corner-radius 0
+    clip-to-geometry false
+    shadow { off; }
+}
+```
+
+Order matters — niri applies matching rules in sequence and the last one to set
+a property wins — so this has to come *after* the rounded-corners-everywhere
+rule, not before it.
+
+The game half of that match list is `local.niri.gameAppIds`, shared with the
+VRR rule in the [next section](#vrr-and-the-judder-that-isnt-the-game), which
+is also where what the default does and does not cover is written down. The
+short version: it covers Steam, and a game launched from Lutris, Prism Launcher
+or Heroic needs adding by hand or it composites every frame.
+
 ### VRR, and the judder that isn't the game
 
 There is a kind of stutter that no amount of frame rate fixes, because it is
@@ -4436,6 +4466,42 @@ window-rule {
 Both halves are required and each does nothing alone — the output declaration
 without the window rule leaves VRR permanently off, and the window rule without
 an on-demand output has nothing to switch.
+
+**That match list is `local.niri.gameAppIds`, and it is shared.** The same list
+is written into the rule above and into the rounding-and-shadow rule described
+in [The desktop is also drawing](#the-desktop-is-also-drawing), because both
+rules mean the same thing — "this window is a game" — and a game that is in one
+and not the other is a bug either way round. One option, two rules.
+
+**Its default only covers Steam**, and that is worth knowing before it bites.
+`steam_app_<id>` is the WM_CLASS Steam gives anything it launches, and
+`gamescope` is the nested compositor's own window, so a title bought on Steam
+is matched whatever engine it uses. A game started from Lutris, Prism Launcher
+or Heroic is not: its app-ID is whatever its own executable sets, and there is
+no pattern to guess from here. Such a game runs with rounded corners and a
+shadow — so niri composites every frame instead of scanning out — and never
+flips the panel into VRR. Nothing on screen says so; it is just slower than the
+same game bought on Steam, which is a confusing thing to debug from the chair.
+
+Adding one takes two steps:
+
+```bash
+niri msg pick-window     # click the game; it prints the app-ID
+```
+
+then append an anchored regex for what it printed:
+
+```nix
+local.niri.gameAppIds = [
+  "^steam_app_"
+  "^gamescope$"
+  "^Minecraft"
+];
+```
+
+Anchor it. An unanchored `Minecraft` also matches a browser tab named after it,
+and a browser tab that turns the panel's refresh rate over to a game rule is
+the flicker case with none of the benefit.
 
 Two reasons to want it that way round rather than holding VRR on. A desktop
 under VRR is a display whose refresh rate tracks how much the shell happens to
@@ -4638,6 +4704,31 @@ that break when it is wrong are input and presentation, which are the two
 things you would least like to have break. Per-game launch options are the
 right granularity for that; a session-wide variable would silently apply it to
 a library.
+
+**`SDL_VIDEODRIVER=wayland` is the same argument, and this session used to get
+it wrong.** It was in the `environment` block in `home/joshr/niri/niri.nix`,
+beside `MOZ_ENABLE_WAYLAND` and `NIXOS_OZONE_WL`, and it does not belong in
+that company. Those are hints: a toolkit that does not understand one ignores
+it. This one is not a hint. SDL tries its backends in order and takes the first
+that works, and setting the variable replaces that search with a single
+mandatory target — so an SDL whose Wayland backend is missing or broken has
+nothing to fall back to, and the game does not start at all.
+
+Under Proton that is the ordinary case rather than an exotic one. The binary is
+a Windows one and the SDL inside it is whatever it shipped with, often an SDL2
+old enough to predate a usable Wayland backend. Steam inherits the session
+environment and hands it to every title it launches, so the one line reached
+the whole library. Distributions that ship it by default collect the reports —
+omarchy's [#2564](https://github.com/basecamp/omarchy/issues/2564) and
+[#1047](https://github.com/basecamp/omarchy/issues/1047) are the same finding
+twice, with named games that fail to launch until it is unset.
+
+It is gone now, and nothing that was actually being bought went with it: a
+native Wayland SDL3 game picks Wayland on its own, and an X11 one goes through
+`xwayland-satellite` exactly as before. If some title ever needs forcing the
+other way, `SDL_VIDEODRIVER=wayland %command%` in that game's launch options is
+the right granularity — which is the same conclusion as the paragraph above it,
+for the same reason.
 
 On the wrappers: `mangohud gamescope -- %command%` puts MangoHud on
 *gamescope*, so the numbers on screen are the compositor's rather than the
@@ -4900,6 +4991,73 @@ this if tearing turns out to be the thing that is missing. Nothing in this
 repository makes that decision hard to change later — the niri hosts are
 separate `nixosConfigurations` precisely so that a second session can exist
 beside a working one rather than replacing it.
+
+### Would sway be better?
+
+Also no, and for this machine the answer is firmer than the Hyprland one —
+sway is the option that would most likely make gaming *worse* here rather than
+better.
+
+It is asked for the same reason Hyprland is: sway can tear and niri cannot.
+Sway 1.10 added `tearing-control-v1`, with `allow_tearing` on an output and a
+per-window override, for fullscreen applications. That is a genuine feature and
+it is genuinely the one thing on this list niri does not have. Everything after
+this is why it does not add up to a reason to move.
+
+**Tearing and VRR are two answers to one question, and this box already has
+the better one.** Both exist because a frame that is ready between refreshes
+has to wait. Tearing stops the waiting by showing the new frame half way down
+the panel, seam and all; VRR stops it by moving the refresh. On a fixed-rate
+panel tearing is the only lever there is, which is why it matters so much to
+people who have one. The 1440p display here does adaptive sync and
+[already uses it](#vrr-and-the-judder-that-isnt-the-game). Adding tearing on
+top of a working VRR panel buys the remaining sub-frame of latency and pays for
+it with a visible seam.
+
+**The proprietary NVIDIA driver is unsupported by sway, explicitly.** Sway
+refuses to start on it without `--unsupported-gpu`, and upstream's stated
+position is that the combination mostly works and that bug reports about it are
+not wanted without a patch attached. That is a reasonable position for a
+project to take and a bad one to build a daily desktop on top of, on a machine
+whose card is the entire point.
+
+**Sway's VRR and direct scanout interact badly, and the workaround costs more
+than tearing gains.** [sway#7714](https://github.com/swaywm/sway/issues/7714)
+is stuttering and choppy pointer movement with VRR on, below the panel's
+refresh rate — the exact case this machine plays in — and the workaround is to
+start sway with `-D noscanout`. That turns direct scanout off. Direct scanout
+is the single largest thing the compositor does for a fullscreen game, it is
+what the `geometry-corner-radius 0` rule in `home/joshr/niri/niri.nix` exists
+to protect, and trading it for tearing is trading the large win for the small
+one.
+
+**And the keymap does not survive.** This is the part that is easy to
+underestimate, because it sounds like a translation job and is not. Sway is an
+i3-style tree; niri is a scrolling row of columns. Around twenty binds name
+operations that have no sway equivalent at all — `focus-column-left`/`right`,
+the `move-column-*` set, `consume-or-expel-window-left`/`right`,
+`consume-window-into-column`, `expel-window-from-column`,
+`switch-preset-column-width`, `switch-preset-window-height`, `center-column`,
+`maximize-column`, `maximize-window-to-edges`, `toggle-column-tabbed-display`,
+`toggle-overview` on both Mod+O and Mod+Tab, and the whole Mod+scroll column
+walk. Those would have to be *reinterpreted* into tree operations, not carried
+over. The muscle memory is the thing being migrated, and it is the thing that
+does not come.
+
+What would survive, for the record, is most of the rest: Noctalia lists sway
+among its first-class compositor integrations, and the session's daemons are
+already sway-ecosystem programs — swayidle, swaylock, swayosd, wofi, cliphist,
+awww. The niri-coupled surface is `niri.nix`, the display configuration, three
+`niri msg` call sites, and the GameMode mechanism, which relies on niri merging
+an included file over the config it already read. That is the same list as for
+Hyprland; the difference is that Hyprland at least offers something in exchange.
+
+The honest summary is that sway's advantage here is one feature this panel does
+not need, and its costs are the driver, the scanout path and the keymap. If
+tearing is ever the thing that matters, niri
+[issue #844](https://github.com/YaLTeR/niri/issues/844) is where it arrives,
+and `gamescope` — already enabled in `modules/nixos/gaming.nix` — is the way to
+get an immediate-flip presentation path today without leaving the session.
 
 ## Single GPU passthrough
 

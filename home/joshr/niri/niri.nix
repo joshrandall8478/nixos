@@ -59,6 +59,27 @@ let
         }''
   ) workspaceNames;
 
+  # `local.niri.gameAppIds` as niri `match` lines, for the two rules below
+  # that both mean "this window is a game" — the one that keeps direct scanout
+  # available and the one that asks for VRR. Sharing one list is what stops
+  # the two drifting apart, which is the failure that leaves a game rendering
+  # without rounding and without VRR, or the reverse, for no stated reason.
+  #
+  # Indented to a window-rule body and interpolated at column zero, the same
+  # way the output and workspace blocks are.
+  #
+  # Two strings rather than one, and the split is not stylistic. The line
+  # itself carries KDL raw-string quotes (`r#"…"#`), which want an indented
+  # string to stay readable — but an indented string holding a single line
+  # would have its leading spaces taken back off again as common indentation,
+  # so the spaces are added by a double-quoted string instead. That is the
+  # same shape `renderOutput` above uses for the same reason.
+  gameMatchLine = re: ''match app-id=r#"${re}"#'';
+
+  gameMatches = lib.concatMapStringsSep "\n" (
+    re: "        ${gameMatchLine re}"
+  ) config.local.niri.gameAppIds;
+
   # The binds that address the shell rather than the compositor.
   #
   # Everything in this block is a command that exists in two versions: a
@@ -474,13 +495,39 @@ ${workspaceBlocks}
         MOZ_ENABLE_WAYLAND "1"
         QT_QPA_PLATFORM "wayland;xcb"
         QT_WAYLAND_DISABLE_WINDOWDECORATION "1"
-        SDL_VIDEODRIVER "wayland"
         _JAVA_AWT_WM_NONREPARENTING "1"
         // Set by niri itself for its own session; declared here so child
         // processes agree on it.
         XDG_CURRENT_DESKTOP "niri"
         XDG_SESSION_TYPE "wayland"
     }
+
+    // `SDL_VIDEODRIVER "wayland"` is deliberately absent from that block, and
+    // it used to be in it.
+    //
+    // The other names above are hints — a toolkit that doesn't understand one
+    // ignores it. This one is not a hint. SDL tries its backends in order and
+    // takes the first that works; setting the variable replaces that search
+    // with a single mandatory target, so an SDL build whose Wayland backend is
+    // missing or broken has nowhere left to fall back to and the game does not
+    // start at all.
+    //
+    // Which is the ordinary case under Proton, not an exotic one: the game is
+    // a Windows binary, and the SDL in the path is whatever it shipped with,
+    // frequently an SDL2 old enough to predate a usable Wayland backend. Steam
+    // inherits this session's environment and hands it to every title it
+    // launches, so one line here reaches a whole library. Distributions that
+    // set it by default collect the bug reports — omarchy's
+    // [#2564](https://github.com/basecamp/omarchy/issues/2564) and
+    // [#1047](https://github.com/basecamp/omarchy/issues/1047) are the same
+    // finding twice, with named games that fail to launch until it is unset.
+    //
+    // Leaving it unset costs nothing that was actually being bought. A native
+    // Wayland SDL3 game picks Wayland by itself, and an X11 one goes through
+    // xwayland-satellite exactly as it did before. `SDL_VIDEODRIVER=wayland
+    // %command%` in a single game's launch options is the right granularity if
+    // some title ever needs to be forced the other way — the same reasoning as
+    // `PROTON_ENABLE_WAYLAND` in "Launch options" in MANUAL.md.
 
     cursor {
         xcursor-theme "Bibata-Modern-Ice"
@@ -570,9 +617,18 @@ ${workspaceBlocks}
     // properties come *after* the rounded-corners-everywhere rule above
     // rather than before it: niri applies matching rules in order and the
     // last one to set a property wins.
+    //
+    // The game half of the match list is `local.niri.gameAppIds`, shared with
+    // the VRR rule below. Its default covers Steam and gamescope and nothing
+    // else — a game started from Lutris, Prism Launcher or Heroic carries
+    // whatever app-ID its own executable sets, so it lands here unmatched and
+    // blends every frame with nothing on screen to say so. `niri msg
+    // pick-window` prints the app-ID to add.
+    //
+    // mpv is written in directly rather than added to that option: it wants
+    // this rule and deliberately not the VRR one. See the note below.
     window-rule {
-        match app-id=r#"^steam_app_"#
-        match app-id=r#"^gamescope$"#
+${gameMatches}
         match app-id=r#"^mpv$"#
         geometry-corner-radius 0
         clip-to-geometry false
@@ -596,8 +652,7 @@ ${workspaceBlocks}
     // a film with a dark scene, so video is left out of it and the on-demand
     // switch stays a thing that only games flip.
     window-rule {
-        match app-id=r#"^steam_app_"#
-        match app-id=r#"^gamescope$"#
+${gameMatches}
         variable-refresh-rate true
     }
 

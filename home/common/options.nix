@@ -381,6 +381,54 @@
     '';
   };
 
+  options.local.niri.gameAppIds = lib.mkOption {
+    type = lib.types.listOf lib.types.str;
+    default = [
+      "^steam_app_"
+      "^gamescope$"
+    ];
+    example = [
+      "^steam_app_"
+      "^gamescope$"
+      "^Minecraft"
+    ];
+    description = ''
+      App-ID regexes for "this window is a game", as niri window-rule
+      matches. Each entry is written into two rules in config.kdl: the one
+      that strips rounding and shadow, and the one that asks for VRR.
+
+      Both of those are performance rather than decoration, which is why the
+      list is one option and not two. A corner radius makes a surface
+      non-rectangular and a shadow makes it non-opaque, and either is enough
+      to stop niri handing the buffer to the display controller — direct
+      scanout — so a fullscreen game costs a full-screen blend every frame
+      instead of costing nothing. The VRR half is the other end of
+      `variableRefreshRate = "on-demand"` on an output: the panel stays at its
+      fixed rate until a window matching this list is on it.
+
+      **The default only covers Steam.** `steam_app_<id>` is the WM_CLASS
+      Steam gives a title it launched, and `gamescope` is the nested
+      compositor's own window, so anything started through Steam is matched
+      however it was bought. A game from Lutris, Prism Launcher or Heroic is
+      not: its app-ID is whatever its executable sets, which is unpredictable
+      from here and cannot be guessed in advance. Such a game runs with
+      rounded corners and a shadow, blending every frame, and never triggers
+      the VRR switch — and it does that silently, because nothing about it
+      looks wrong except the frame rate.
+
+      Adding one is two steps. `niri msg pick-window` prints the app-ID of
+      whatever you click, so run it with the game up, then append an anchored
+      regex for what it printed. Anchor it: an unanchored `Minecraft` also
+      matches a browser tab titled after it.
+
+      Video players are deliberately not here. mpv wants the scanout half and
+      is written into that rule directly in home/joshr/niri/niri.nix; it stays
+      out of the VRR half because a panel that flickers under VRR would do it
+      during a dark scene in a film. See "VRR, and the judder that isn't the
+      game" in MANUAL.md.
+    '';
+  };
+
   options.local.niri.screenshotFreeze = lib.mkOption {
     type = lib.types.bool;
     default = true;
