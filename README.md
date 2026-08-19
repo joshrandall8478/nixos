@@ -154,6 +154,7 @@ walks the whole thing from a live ISO.
   [the root account](MANUAL.md#the-root-account)
 - **Working in it** —
   [gaming performance](MANUAL.md#gaming-performance) ·
+  [`gamescope-run`](MANUAL.md#nested-gamescope-and-gamescope-run) ·
   [the Steam controller](MANUAL.md#the-controller-and-the-second-cursor) ·
   [the kernel](MANUAL.md#the-kernel) ·
   [development environments](MANUAL.md#development-environments) ·

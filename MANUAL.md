@@ -70,8 +70,11 @@ the machine.
   - [The card is also the model server](#the-card-is-also-the-model-server)
   - [Split locks](#split-locks)
   - [Launch options](#launch-options)
+  - [Nested gamescope, and `gamescope-run`](#nested-gamescope-and-gamescope-run)
   - [The XWayland regression](#the-xwayland-regression)
+  - [Explicit sync, and the flag that was removed](#explicit-sync-and-the-flag-that-was-removed)
   - [The driver](#the-driver)
+  - [The Wayland environment variables](#the-wayland-environment-variables)
   - [The kernel](#the-kernel)
   - [Would Hyprland be better?](#would-hyprland-be-better)
 - [Single GPU passthrough](#single-gpu-passthrough)
@@ -4645,7 +4648,102 @@ game's. The order that measures the game is `gamescope … -- mangohud
 %command%`. And nested gamescope is not free on this card — it composites
 again, and on NVIDIA the `gamescope-wsi` layer adds a frame copy on top of
 that. It buys resolution and refresh-rate control; if neither is wanted for a
-given game, the fastest configuration is not to nest at all.
+given game, the fastest configuration is not to nest at all. When it is wanted,
+`gamescope-run` is the next section and is what to paste rather than a
+gamescope line assembled by hand.
+
+### Nested gamescope, and `gamescope-run`
+
+`modules/nixos/gaming.nix` installs a `gamescope-run` command on the two desk
+hosts. It is the long gamescope line with this machine's answers already in it:
+
+```
+gamescope-run -f -- %command%
+```
+
+in a game's launch options, or from a terminal:
+
+```
+gamescope-run -f -- some-game
+gamescope-run -f -- mangohud some-game     # flags before --, program after
+gamescope-run -- some-game                 # a window rather than fullscreen
+```
+
+Everything before a `--` goes to gamescope and everything after it is the
+program to run; with no `--` at all the whole line is the program, so
+`gamescope-run %command%` on its own works too. The `-f` is worth typing under
+niri: without it the nested window is an ordinary window, and the compositor
+sizes it to whatever the layout says rather than to the `-W`/`-H` below — a
+game rendering at 2560x1440 into half a screen. The line expands to
+
+```
+gamescope --backend sdl -w 2560 -h 1440 -W 2560 -H 1440 -f -- <the game>
+```
+
+with the Steam overlay handled, and three things in it are worth knowing about.
+
+**The SDL backend is the NVIDIA part.** Left to itself gamescope picks the
+Wayland backend inside a Wayland session, which puts a nested compositor's
+buffers through the outer compositor with no explicit fence attached — see
+"Explicit sync, and the flag that was removed" below for why there isn't one.
+The SDL backend goes out through SDL's own window instead and sidesteps it.
+`local.gaming.gamescope.backend` in `modules/nixos/options.nix` is the knob, it
+already defaults to `auto` on a host without the NVIDIA driver, and `auto` is
+what to come back to when niri grows explicit sync.
+
+**The resolution is one number, twice.** gamescope takes the render size and
+the display size separately — `-w`/`-h` and `-W`/`-H` — and `gamescope-run`
+sets both to `local.gaming.gamescope.width` and `.height`, which default to the
+2560x1440 of the desk's main panel. Equal is the point: anything else is a
+rescale, and a rescale into a panel that is already that size costs a filter
+pass for nothing.
+
+`GAMESCOPE_WIDTH` and `GAMESCOPE_HEIGHT` move both halves together for one
+launch, which shrinks the whole thing — window included — rather than upscaling
+anything:
+
+```
+GAMESCOPE_WIDTH=1920 GAMESCOPE_HEIGHT=1080 gamescope-run -- %command%
+```
+
+To render below native and have gamescope scale *up* into a full-size window,
+override only the render half by passing a second `-w`/`-h` through. The
+wrapper's own flags come first and gamescope takes the last occurrence of an
+option, so this renders at 1080p inside a 1440p window:
+
+```
+gamescope-run -f -w 1920 -h 1080 -- %command%
+```
+
+The same holds for anything else in the line: `gamescope-run --backend wayland
+-- %command%` overrides the backend for one game without touching the option,
+and it is why `-f` above ends up after the wrapper's own flags rather than
+fighting with them.
+
+**The Steam overlay is taken away from gamescope and given back to the game.**
+Steam preloads `gameoverlayrenderer.so` into everything it launches, and under
+the SDL backend gamescope keeps it: the overlay hooks the *compositor's*
+presentation, adds work to every frame it draws, and is one good reason a game
+that was fine unnested gets choppy once gamescope is in front of it. The advice
+that goes round for this is `LD_PRELOAD="" gamescope …`, which works and costs
+the overlay entirely — no Shift+Tab, no FPS counter, no screenshot key.
+`gamescope-run` does it in two steps instead, dropping the preload for gamescope
+and restoring it for the game, so the overlay ends up loaded into the process it
+was always meant to hook — Shift+Tab, the FPS counter and the screenshot key all
+still work. Upstream gamescope has since grown the same trick
+(`RestartWithoutSteamOverlay`), and it would not help here anyway: it
+deliberately skips the SDL backend, on the grounds that SDL is the one backend
+that can draw the overlay. The version pinned here, 3.16.25, does not have it at
+all.
+
+Nesting is not free and this is not a thing to put in front of every game.
+gamescope composites the game and the session composites gamescope, so a
+fullscreen game that would have had the display controller to itself pays for
+two compositors instead of none. What it buys is a fixed resolution and refresh
+rate the game cannot argue with, an isolation boundary for a title that
+mishandles alt-tab or resolution changes, and gamescope's own scaling filters.
+When none of those is wanted, the fastest configuration is still not to nest at
+all.
 
 ### The XWayland regression
 
@@ -4673,6 +4771,70 @@ ls /run/opengl-driver/share/egl/egl_external_platform.d/
 Files there, good. Nothing there, that is the bug and the environment variable
 from the thread is the stopgap until nixpkgs moves again.
 
+### Explicit sync, and the flag that was removed
+
+A Wayland client that hands the compositor a buffer has to say, somehow, when
+the GPU has actually finished drawing into it. There are two ways. Implicit
+sync attaches the fence to the buffer itself, down in the kernel's DMA-BUF
+layer, and the compositor never sees it: it submits its own work and the
+kernel orders the two. Explicit sync — the `linux-drm-syncobj-v1` protocol —
+passes the fence up as a first-class object, which is what NVIDIA's driver
+prefers and, for a long stretch, was the only thing it did properly.
+
+**niri 26.04 does not implement `linux-drm-syncobj-v1`.** It is not in the
+protocol list its handlers delegate, so every client here is on the implicit
+path, driver preferences notwithstanding. That is the thing behind most of what
+turns up when searching for niri and NVIDIA together, and it is also why
+`gamescope-run` asks for the SDL backend rather than the Wayland one: a nested
+compositor is a client too, and it is the client most likely to notice.
+
+The workaround that comes with those search results is this, and **it must not
+be pasted into the config**:
+
+```kdl
+debug {
+    // Does not exist any more. See below.
+    wait-for-frame-completion-in-pipewire
+}
+```
+
+It was real. niri's own NVIDIA page documented it as the fix for screencast
+flicker, marked "Until: 25.08", and it was removed in that release because the
+flicker had been fixed properly and the flag no longer had anything to do.
+niri's parser does not ignore a node it does not recognise — it rejects the
+file — so writing that block today does not quietly do nothing. It costs the
+whole of `config.kdl`, which on a fresh login means a session with default
+keybindings and no theme, and on a reload means the change simply never
+arriving. Anything being added to `debug` should be checked against
+`DebugPart` in `niri-config/src/debug.rs` at the version the flake is pinned to
+rather than against a post.
+
+What survives is its general-purpose sibling, wired up here as
+`local.niri.waitForFrameCompletion` (`home/common/options.nix`):
+
+```nix
+# home/joshr/gamestation-niri.nix
+local.niri.waitForFrameCompletion = true;
+```
+
+which writes `wait-for-frame-completion-before-queueing` into the `debug` block
+and makes niri block on each frame's render fence, on the CPU, before queueing
+it to DRM. It is **off by default and meant to be turned back off**: it
+serialises the compositor against the GPU, which costs exactly the latency and
+throughput this section of the manual is otherwise about. It is a diagnostic —
+if flicker, a stale frame or tearing that VRR does not explain goes away with
+it on, the answer is a synchronisation bug and this is the stopgap; if nothing
+changes, it has ruled the whole area out in one rebuild.
+
+One more NVIDIA-and-niri quirk is worth knowing about even though nothing here
+implements it: the driver does not return freed buffers to its pool promptly,
+so niri can sit on the better part of a gigabyte of video memory where it
+should be using around a hundred megabytes. `nvtop` shows it, and niri's wiki
+carries the fix — a `GLVidHeapReuseRatio` application profile dropped into
+`/etc/nvidia/nvidia-application-profiles-rc.d/`. It is not configured in this
+repository. If `gaming-doctor` ever shows the compositor itself holding an
+unreasonable share of the card, that is the thread to pull.
+
 ### The driver
 
 `modules/nixos/nvidia.nix` pins `nvidiaPackages.latest`, which on the current
@@ -4687,6 +4849,52 @@ firmware is in use and cannot be turned off — the `NVreg_EnableGpuFirmware=0`
 advice that turns up in stutter threads does not apply to a configuration built
 this way. `gaming-doctor` prints which module is loaded so there is no need to
 guess.
+
+### The Wayland environment variables
+
+`modules/nixos/nvidia.nix` sets three variables for the whole session, next to
+the shader-cache pair:
+
+```
+GBM_BACKEND=nvidia-drm
+__GLX_VENDOR_LIBRARY_NAME=nvidia
+LIBVA_DRIVER_NAME=nvidia
+```
+
+None of them is a preference. Each names a loader that would otherwise have to
+guess which implementation to open, and each guess fails in a way that produces
+a symptom rather than an error.
+
+`GBM_BACKEND` is the compositor's own. GBM is how a Wayland compositor asks for
+buffers it can scan out, Mesa's `libgbm` picks a backend from the DRM driver's
+name, and `nvidia-drm` is the backend the driver installs into
+`/run/opengl-driver/lib/gbm`. `__GLX_VENDOR_LIBRARY_NAME` is libglvnd's, and it
+is about XWayland rather than Wayland: every Proton game here is an X11 client,
+and glvnd has to pick a vendor's GLX for it. `LIBVA_DRIVER_NAME` is libva's,
+and it is about video decode — a browser playing h264 or AV1, OBS encoding it —
+rather than about games at all.
+
+They are set through `environment.sessionVariables`, which reaches
+`/etc/pam/environment` and therefore everything the greeter starts. That is
+deliberate and it is the reason they are not in niri's own `environment {}`
+block: that block sets variables for the processes niri *spawns*, and the
+compositor is not one of them, so `GBM_BACKEND` in particular would arrive
+after the process that needed it.
+
+`LIBVA_DRIVER_NAME` is the one with a package behind it. libva loads
+`nvidia_drv_video.so` when told to use the `nvidia` driver, nothing in the
+NVIDIA driver package provides one, and the shim that does is
+`nvidia-vaapi-driver`, which is in `hardware.graphics.extraPackages` in the
+same file, so the variable names something that exists. 64-bit only, because
+nothing 32-bit here decodes video. `NVD_BACKEND` is the knob if decode still
+refuses; its default is already `direct`, which is the half that works on
+drivers after the 525 series.
+
+All three are safe here **because this box has one GPU**. Forcing a GBM backend
+on a machine that also has an integrated GPU would break every Mesa client on
+the other card, which is why this lives in the desktop NVIDIA module — imported
+by the two `gamestation` hosts and nothing else — rather than anywhere the
+laptop would pick it up.
 
 ### The kernel
 

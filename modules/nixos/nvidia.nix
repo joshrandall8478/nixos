@@ -61,6 +61,25 @@
   hardware.graphics = {
     enable = true;
     enable32Bit = true; # needed for Steam/Proton
+
+    # What `LIBVA_DRIVER_NAME = "nvidia"` further down this file is naming.
+    #
+    # libva looks up a driver by that name and loads `nvidia_drv_video.so`;
+    # nothing in the NVIDIA driver package provides one, so without this the
+    # variable names a backend that isn't there and every VA-API probe fails
+    # at `vaInitialize`. nvidia-vaapi-driver is the shim that answers it,
+    # translating VA-API onto NVDEC.
+    #
+    # It is 64-bit only on purpose. There is no `extraPackages32` line to
+    # match, because the 32-bit consumers of VA-API here are none: browsers
+    # and OBS are 64-bit, and a Proton game does not decode video through
+    # libva.
+    #
+    # `NVD_BACKEND` is the knob if decode still refuses — it chooses between
+    # reaching the kernel driver directly and going through EGL, and the EGL
+    # half has been broken since the 525 series. The default is already
+    # `direct`, so nothing sets it here.
+    extraPackages = [ pkgs.nvidia-vaapi-driver ];
   };
 
   hardware.nvidia = {
@@ -139,6 +158,43 @@
   environment.sessionVariables = {
     __GL_SHADER_DISK_CACHE = "1";
     __GL_SHADER_DISK_CACHE_SKIP_CLEANUP = "1";
+
+    # Three names for "use NVIDIA's implementation and not Mesa's".
+    #
+    # None of them is a preference. Each one names a loader that would
+    # otherwise *guess* which backend to open, and each guess is wrong in a
+    # way that produces a symptom rather than an error message.
+    #
+    # `GBM_BACKEND` is the one the compositor itself needs, and the reason all
+    # three are here rather than in niri's own `environment {}` block: that
+    # block sets variables for the processes niri spawns, and niri is not one
+    # of them. `environment.sessionVariables` goes through /etc/pam/environment,
+    # so it is already set for whatever the greeter starts — the compositor
+    # included. GBM is how a Wayland compositor asks for buffers it can scan
+    # out, Mesa's libgbm picks a backend from the DRM driver's name, and
+    # `nvidia-drm` is the one the driver installs into
+    # /run/opengl-driver/lib/gbm. Left to guess, the failure is a session that
+    # starts on llvmpipe or does not start at all.
+    #
+    # `__GLX_VENDOR_LIBRARY_NAME` is libglvnd's, and it is about XWayland
+    # rather than about Wayland: every Proton game here is an X11 client (see
+    # "The XWayland regression" in MANUAL.md), and glvnd has to decide which
+    # vendor's GLX to load for it.
+    #
+    # `LIBVA_DRIVER_NAME` is libva's, and it is the one with a package behind
+    # it — see `hardware.graphics.extraPackages` at the top of this file.
+    # Video decode rather than games: a browser playing back h264 or AV1, or
+    # OBS encoding it.
+    #
+    # All three are safe here *because this box has one GPU*. Forcing a GBM
+    # backend on a machine with an integrated GPU as well would break every
+    # Mesa client on the other card, which is why this lives in the desktop
+    # NVIDIA module — imported only by the two gamestation hosts — and not in
+    # base.nix or desktop.nix. The laptop, which does have an Intel GPU, never
+    # sees it.
+    GBM_BACKEND = "nvidia-drm";
+    __GLX_VENDOR_LIBRARY_NAME = "nvidia";
+    LIBVA_DRIVER_NAME = "nvidia";
   };
 
   environment.systemPackages = with pkgs; [

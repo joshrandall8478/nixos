@@ -1137,6 +1137,82 @@
     '';
   };
 
+  # `gamescope-run` — the nested-gamescope launcher in modules/nixos/gaming.nix.
+  # "Nested gamescope, and `gamescope-run`" in MANUAL.md is the prose version,
+  # including what to paste into a game's launch options.
+  options.local.gaming.gamescope.width = lib.mkOption {
+    type = lib.types.ints.positive;
+    default = 2560;
+    description = ''
+      Width `gamescope-run` renders and displays at, in pixels.
+
+      One number covers both halves of gamescope's pair — `-w`, the resolution
+      the game renders at, and `-W`, the resolution the nested window is shown
+      at — because anything other than 1:1 is a rescale, and a rescale on the
+      way to a panel that is already this size costs a filter pass and some
+      sharpness for nothing.
+
+      The default is the desk's main panel (`home/joshr/displays/gamestation.nix`
+      pins DP-3 to 2560x1440@179.952). Nothing reads that file from this side,
+      so the two are kept in step by hand; a mismatch is not an error, it is a
+      game rendering at one size and being scaled to another.
+
+      `GAMESCOPE_WIDTH` and `GAMESCOPE_HEIGHT` move both halves together for a
+      single launch — a smaller window at a smaller render size, not an
+      upscale. To render below native and be scaled up into a full-size
+      window, pass a second `-w`/`-h` through the wrapper instead —
+      `gamescope-run -w 1920 -h 1080 -- <game>`. The flags a caller passes
+      land after these, and gamescope takes the last occurrence of an
+      option.
+    '';
+  };
+
+  options.local.gaming.gamescope.height = lib.mkOption {
+    type = lib.types.ints.positive;
+    default = 1440;
+    description = ''
+      Height `gamescope-run` renders and displays at, in pixels. The other half
+      of `local.gaming.gamescope.width`; `GAMESCOPE_HEIGHT` overrides it for one
+      launch.
+    '';
+  };
+
+  options.local.gaming.gamescope.backend = lib.mkOption {
+    type = lib.types.enum [
+      "auto"
+      "sdl"
+      "wayland"
+      "drm"
+      "headless"
+    ];
+    default = if lib.elem "nvidia" config.services.xserver.videoDrivers then "sdl" else "auto";
+    defaultText = lib.literalExpression ''
+      "sdl" when services.xserver.videoDrivers contains "nvidia",
+      otherwise "auto"
+    '';
+    description = ''
+      Which backend `gamescope-run` asks gamescope for — how the nested
+      compositor gets its own frames onto the screen.
+
+      This is the NVIDIA line in the whole arrangement. `auto` picks the
+      Wayland backend inside a Wayland session, which puts gamescope's output
+      through the same driver path that everything else here already fights
+      with: no `linux-drm-syncobj-v1` in niri 26.04, so a nested compositor
+      handing buffers to an outer one has no explicit fence to hand over with
+      them, and what that looks like is not a crash but flicker, a stale
+      frame, and pacing that wanders. The SDL backend goes out through
+      SDL's own window instead and does not hit it.
+
+      It is not free — gamescope composites the game once and the session
+      composites gamescope again — so this is a trade, not a fix. `auto` is
+      the setting to come back to when niri grows explicit sync.
+
+      `drm` takes a display for itself and is not usable from inside a
+      session; `headless` renders to nothing, which is only interesting for
+      recording. `GAMESCOPE_BACKEND` overrides this for one launch.
+    '';
+  };
+
   # The headless NVIDIA card — modules/nixos/nvidia-server.nix, which is where
   # the mechanics are written down and these are the knobs. "The NVIDIA
   # server" in MANUAL.md is the prose version.

@@ -438,6 +438,39 @@
     '';
   };
 
+  options.local.niri.waitForFrameCompletion = lib.mkOption {
+    type = lib.types.bool;
+    default = false;
+    description = ''
+      Make niri wait for each frame to finish rendering before it queues it to
+      DRM — the `wait-for-frame-completion-before-queueing` debug flag.
+
+      This is the surviving half of the advice that goes around for NVIDIA.
+      The other half, `wait-for-frame-completion-in-pipewire`, was the fix for
+      screencast flicker on this driver and **no longer exists**: niri removed
+      it in 25.08 once the underlying problem was fixed properly, and its
+      config parser rejects nodes it does not know, so writing it into
+      config.kdl today is not a no-op — it is a config error that costs the
+      whole file. niri 26.04 is what this flake pins. See "Explicit sync, and
+      the flag that was removed" in MANUAL.md.
+
+      What is left does the general form of the same thing, and it is a
+      diagnostic rather than a setting. Normally niri hands a frame to the
+      kernel with a fence attached and gets on with the next one; this makes
+      it block on that fence first, on the CPU, every frame. That serialises
+      the compositor against the GPU, so it costs latency and throughput on a
+      machine where both matter — which is why it is off, on the NVIDIA hosts
+      as much as anywhere else.
+
+      Turn it on when presentation is visibly wrong rather than merely slow:
+      flicker, a frame of the previous frame, tearing that VRR does not
+      explain. If it makes the symptom go away, the answer is a driver
+      synchronisation bug and this is the workaround for it until the driver
+      or niri moves; if it does not, it has told you where not to look. Either
+      way it is worth taking back off afterwards.
+    '';
+  };
+
   # OpenRGB's options are not here. `local.openrgb.autostart`, `.profile` and
   # `.applyOnResume` are declared on the NixOS side (modules/nixos/options.nix)
   # and read from this side through `osConfig`, because the session isn't the
