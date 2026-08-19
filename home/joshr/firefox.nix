@@ -91,8 +91,11 @@ in
         # Ask for hardware video decode. Whether it's actually used depends on
         # the driver having a VA-API backend — Intel on the laptop does out of
         # the box; NVIDIA's proprietary stack needs nvidia-vaapi-driver, which
-        # this config doesn't install. Firefox falls back to software decode
-        # either way, so this is a request, not a guarantee.
+        # the desk hosts install alongside `LIBVA_DRIVER_NAME` in
+        # modules/nixos/nvidia.nix. Firefox falls back to software decode
+        # either way, so this is a request, not a guarantee. `nix run
+        # nixpkgs#libva-utils -- vainfo` is what says whether the backend
+        # answered; nothing here installs it.
         "media.ffmpeg.vaapi.enabled" = true;
 
         # --- first-run and new tab noise -------------------------------

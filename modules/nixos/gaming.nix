@@ -596,6 +596,118 @@ let
       fi
     '';
   };
+
+  # `gamescope-run` — the nested-gamescope launcher.
+  #
+  # What it is a shorter way of typing:
+  #
+  #     gamescope --backend sdl -w 2560 -h 1440 -W 2560 -H 1440 -- <game>
+  #
+  # with the sizes and the backend coming from `local.gaming.gamescope.*`, and
+  # on top of that the Steam-overlay adjustment that line needs on this machine.
+  #
+  # **It is a program and not a shell alias, and it has to be.** The place this
+  # is used is Steam's per-game launch options, and Steam does not run those
+  # through anybody's login shell: it substitutes `%command%` and executes the
+  # result, so a fish function or an `alias` in home/common/shell.nix would be
+  # invisible there. A binary on PATH is visible to Steam, to Lutris, to a
+  # .desktop file and to a terminal alike, which is why it is here — in the
+  # system module both desk hosts import — rather than in anyone's profile.
+  #
+  #     gamescope-run -f -- %command%           # in Steam's launch options
+  #     gamescope-run -f -- mangohud %command%
+  #     gamescope-run -- supertuxkart           # a window, not fullscreen
+  #
+  # Everything before a `--` is handed to gamescope, everything after it is the
+  # program to run; with no `--` the whole line is the program. That ordering is
+  # also the answer to the MangoHud question — `mangohud gamescope-run …` would
+  # measure the *compositor*, and the form above measures the game.
+  #
+  # `-f` is not baked in and usually wants to be typed. Without it the nested
+  # window is an ordinary one, and niri will size it to whatever the layout
+  # says rather than to the `-W`/`-H` this passes — which is a game rendering
+  # at 2560x1440 into half a screen. Under Plasma, or for a game deliberately
+  # played in a window, leaving it off is the point.
+  #
+  # The Steam overlay, and why LD_PRELOAD is taken away and given back
+  # -----------------------------------------------------------------
+  # Steam preloads gameoverlayrenderer.so into everything it starts, and under
+  # `--backend sdl` gamescope keeps it: it hooks gamescope's own presentation,
+  # adds work to every frame the compositor draws, and is the "it got choppy
+  # once I nested it" report. gamescope 3.16.25 — the version pinned here — has
+  # nothing that deals with this; the re-exec-without-the-overlay logic upstream
+  # added later (`RestartWithoutSteamOverlay`) explicitly *skips* the SDL
+  # backend, on the grounds that SDL is the one backend that can draw the
+  # overlay. Which is true, and is not the trade wanted here.
+  #
+  # So the preload is dropped for gamescope and put back for the game, which is
+  # the same shape as gamescope's own later fix and keeps what the plain
+  # `LD_PRELOAD=""` advice throws away: the overlay, Shift+Tab, the FPS counter
+  # and the screenshot key all still work, because they are loaded into the
+  # process they were always meant to hook. Nothing is done when Steam is not
+  # in the picture — LD_PRELOAD is unset from a terminal, and the command that
+  # runs is then the plain one.
+  #
+  # `gamescope` is called by name rather than by store path on purpose: that
+  # resolves to the wrapper nixpkgs' own module builds, so `programs.gamescope`
+  # `args` and `env` are honoured, as is the setcap wrapper `capSysNice` would
+  # put in /run/wrappers/bin.
+  gamescopeRun = pkgs.writeShellApplication {
+    name = "gamescope-run";
+
+    # Deliberately not `gamescope` — see above. coreutils is here for `env`,
+    # which is what does the taking away and the giving back.
+    runtimeInputs = [ pkgs.coreutils ];
+
+    text = ''
+      # The configured size, overridable per launch. See
+      # `local.gaming.gamescope.*` in modules/nixos/options.nix.
+      width=''${GAMESCOPE_WIDTH:-${toString config.local.gaming.gamescope.width}}
+      height=''${GAMESCOPE_HEIGHT:-${toString config.local.gaming.gamescope.height}}
+      backend=''${GAMESCOPE_BACKEND:-${config.local.gaming.gamescope.backend}}
+
+      # Split "flags -- command" into its two halves. Looking for the
+      # separator first, rather than consuming arguments until one turns up,
+      # is what makes the no-separator form work: `gamescope-run %command%` has
+      # no `--` in it and every argument is the game's.
+      flags=()
+      for arg in "$@"; do
+        if [ "$arg" = "--" ]; then
+          while [ "$1" != "--" ]; do
+            flags+=("$1")
+            shift
+          done
+          shift
+          break
+        fi
+      done
+
+      if [ "$#" -eq 0 ]; then
+        echo "usage: gamescope-run [gamescope flags...] [--] <command> [args...]" >&2
+        exit 2
+      fi
+
+      # -w/-h is what the game renders at, -W/-H what the nested window is
+      # displayed at. Equal, so nothing is rescaled.
+      gs=(gamescope --backend "$backend"
+          -w "$width" -h "$height" -W "$width" -H "$height"
+          "''${flags[@]}" --)
+
+      # Take the Steam overlay away from the compositor and hand it back to
+      # the game. Both `env`s are load-bearing: the first drops the preload
+      # before gamescope is started, the second puts the original value back
+      # for the process it was meant for. See the header. With no preload to
+      # begin with — which is every launch that did not come from Steam —
+      # `pre` stays empty and the line below is the plain command.
+      pre=()
+      if [ -n "''${LD_PRELOAD:-}" ]; then
+        pre=(env -u LD_PRELOAD)
+        set -- env LD_PRELOAD="$LD_PRELOAD" "$@"
+      fi
+
+      exec "''${pre[@]}" "''${gs[@]}" "$@"
+    '';
+  };
 in
 {
   # local.* lives in its own module so this one can stay a config attrset.
@@ -674,6 +786,11 @@ in
     # "Why is it slow *now*" — see the comment on the derivation above, and
     # "Gaming performance" in MANUAL.md for what to do with each answer.
     gamingDoctor
+
+    # The nested-gamescope launcher, for Steam's launch options. A program
+    # rather than a shell alias because Steam is what runs it — see the
+    # comment on the derivation.
+    gamescopeRun
   ];
 
   programs.gamemode = {

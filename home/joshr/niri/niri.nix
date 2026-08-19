@@ -367,6 +367,29 @@ let
   # login-time apply never happened at all. `spawn-sh-at-startup` is the node
   # that takes a command line; every other spawn in this file uses the
   # argument-per-string form, so this does too.
+
+  # niri's `debug` node, when `local.niri.waitForFrameCompletion` asks for it.
+  #
+  # One flag, and what it is aimed at is the NVIDIA driver on the two desk
+  # hosts (modules/nixos/nvidia.nix; the laptop has no discrete card). It makes
+  # niri block on each frame's render fence before queueing it to DRM instead
+  # of handing the fence over and moving on, which is the blunt way to rule a
+  # driver synchronisation bug in or out — see the option in
+  # home/common/options.nix for what it costs and why it is not on by default.
+  #
+  # **`wait-for-frame-completion-in-pipewire` cannot be written here**, and
+  # this is the one thing to know before adding to this block: it was niri's
+  # NVIDIA screencast-flicker workaround, it was removed in 25.08 when that was
+  # fixed properly, and niri's parser rejects an unknown node in `debug` rather
+  # than ignoring it — so an unrecognised flag does not degrade to nothing, it
+  # takes config.kdl with it. Everything niri 26.04 still accepts is in
+  # `DebugPart` in niri-config/src/debug.rs; check there before writing a flag
+  # a forum post recommends.
+  debugBlock = lib.optionalString config.local.niri.waitForFrameCompletion ''
+    debug {
+        wait-for-frame-completion-before-queueing
+    }
+  '';
 in
 {
   xdg.configFile."niri/config.kdl".text = ''
@@ -501,6 +524,8 @@ ${workspaceBlocks}
     overview {
         zoom 0.5
     }
+
+${debugBlock}
 
     // Neither shell is started here. waybar and noctalia both run as systemd
     // user services — waybar so the theme switcher can restart it (waybar.nix),
