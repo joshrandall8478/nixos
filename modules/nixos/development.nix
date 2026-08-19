@@ -189,5 +189,6 @@ in
       lazygit
       gnumake
       claude-code
+      drawio
     ]);
 }
