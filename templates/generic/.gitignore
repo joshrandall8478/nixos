@@ -5,3 +5,6 @@
 # nix build output symlink.
 result
 result-*
+
+# The stamp the shellHook's bootstrap example writes, if you uncomment it.
+.dev-shell-deps

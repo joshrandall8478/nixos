@@ -113,6 +113,16 @@ dev-init            # generic skeleton
 dev-init python     # or: node, rust, go
 ```
 
+The language templates go a step further than putting the toolchain on `PATH`:
+entering the shell also installs the project's own dependencies, so a fresh
+clone is ready to run. `npm install` when `node_modules` is missing or
+`package.json` moved (`pnpm` or `yarn` if that's the committed lockfile),
+`uv sync` or `uv pip install -r requirements.txt`, `go mod download`,
+`cargo fetch`. A stamp file keeps an ordinary `cd` free of all of it,
+`DEV_NO_INSTALL=1` turns it off, and a failed install is a message rather than
+a shell that won't open —
+[Dependencies, on the way in](MANUAL.md#dependencies-on-the-way-in).
+
 On the NixOS hosts it arrives with `modules/nixos/development.nix`, whose
 import is commented out per host — uncomment it on the machines you actually
 develop on. Anywhere else nix is a package like any other and the module's
@@ -191,6 +201,36 @@ isn't on `PATH`. `nix` itself resolves either way, out of `/usr/bin`. The
 other Arch one: if `getent group nix-users` says that group exists, run
 `sudo usermod -aG nix-users "$USER"` and log back in, or every nix command
 fails on the daemon socket.
+
+**Keeping it current.** None of that follows this repo on its own. The NixOS
+hosts move everything at once on a rebuild; a nix profile moves when you tell
+it to:
+
+```bash
+nix profile list                # what's installed, and the flake each came from
+nix profile upgrade dev-init    # one entry, by the name that list prints
+nix profile upgrade --all       # every entry
+```
+
+`upgrade` re-resolves the ref an entry was *installed* from rather than the
+revision it locked, so `dev-init` follows this repo's default branch, and
+`direnv`/`nix-direnv` follow whatever the bare `nixpkgs` resolves to here —
+the global registry's `nixpkgs-unstable`, unless you added the [registry
+pin](MANUAL.md#nix-on-a-machine-that-isnt-nixos), in which case they move when
+you re-run the pin and not before. Nix caches that resolution for an hour;
+`--refresh` is how you say you know something landed a minute ago. The
+`extra-substituters` question from step 3 comes back on every `dev-init`
+upgrade — decline it again.
+
+The templates aren't in the profile and never need upgrading: `dev-init` reads
+them from the flake at the moment you run it.
+
+Old profile generations are GC roots, and off NixOS nothing collects them:
+
+```bash
+nix profile wipe-history --older-than 14d
+nix-collect-garbage --delete-older-than 14d
+```
 
 [Development environments](MANUAL.md#development-environments) is the
 per-project workflow, and [Nix on a machine that isn't
