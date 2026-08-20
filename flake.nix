@@ -376,6 +376,14 @@
       #
       # They live here rather than in a separate repo so that the machines
       # and the shells they build are updated by the same `nix flake update`.
+      #
+      # Each language template's shellHook also installs the project's own
+      # dependencies on the way in — npm install, uv sync or a requirements
+      # file, go mod download, cargo fetch — guarded by a stamp file so an
+      # ordinary entry costs no subprocess at all, and by DEV_NO_INSTALL=1
+      # for a project whose dependencies are being managed by hand. Nix
+      # brings the toolchain and the toolchain brings the libraries, so a
+      # project's own lockfile stays the thing that decides.
       templates = {
         default = self.templates.generic;
 
@@ -389,10 +397,11 @@
 
         python = {
           path = ./templates/python;
-          description = "Python 3.12 with uv, ruff and a project-local venv";
+          description = "Python 3.13 with uv, ruff and a project-local venv";
           welcomeText = ''
             Nix supplies the interpreter and tooling; the venv created by the
-            shellHook supplies the libraries. `direnv allow` to enter.
+            shellHook supplies the libraries, installed on entry from
+            requirements.txt or a pyproject.toml. `direnv allow` to enter.
           '';
         };
 
@@ -400,8 +409,10 @@
           path = ./templates/node;
           description = "Node.js 22 with pnpm and the TypeScript language server";
           welcomeText = ''
-            `direnv allow` to enter. npm's global prefix is redirected into
-            the project, so `npm i -g` works.
+            `direnv allow` to enter. node_modules is installed on entry and
+            refreshed whenever package.json or the lockfile moves, and npm's
+            global prefix is redirected into the project, so `npm i -g`
+            works.
           '';
         };
 
@@ -409,7 +420,8 @@
           path = ./templates/rust;
           description = "Rust toolchain from nixpkgs, with rust-analyzer and clippy";
           welcomeText = ''
-            `direnv allow` to enter. Native libraries your crates link
+            `direnv allow` to enter; the crates the project locks are
+            fetched on the way in. Native libraries your crates link
             against go in `buildInputs`.
           '';
         };
@@ -418,7 +430,8 @@
           path = ./templates/go;
           description = "Go with gopls, gotools and golangci-lint";
           welcomeText = ''
-            `direnv allow` to enter. GOPATH is redirected into the project.
+            `direnv allow` to enter. GOPATH is redirected into the project,
+            and the module cache is filled on the way in.
           '';
         };
       };

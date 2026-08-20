@@ -107,6 +107,60 @@
             uv venv --python "${python}/bin/python" .venv
           fi
           source .venv/bin/activate
+
+          # The libraries that venv is for, installed on the way in, so a
+          # fresh clone is ready to run rather than ready to be set up.
+          #
+          # Which files count is uv's own division and not a guess: a
+          # uv.lock, or a pyproject.toml with a [project] table, is a
+          # packaged project, and `uv sync` installs precisely what the lock
+          # says (writing the lock first if it isn't there). Anything else
+          # is requirements files, and they go in together in one resolve so
+          # a dev pin can't quietly contradict the runtime one.
+          #
+          # The stamp inside the venv is what makes this cheap enough to sit
+          # in a hook that runs at every prompt: touched only after an
+          # install that worked, so the ordinary case — nothing edited since
+          # — is a handful of `test` builtins and no subprocess at all. The
+          # rebuild above takes the stamp with it, which is the point. A new
+          # venv is an empty one, and everything has to go back into it.
+          #
+          # DEV_NO_INSTALL=1 in the environment turns it off, for a project
+          # whose dependencies are being managed by hand.
+          stamp=.venv/.dev-shell-deps
+          stale=""
+          for manifest in uv.lock pyproject.toml requirements.txt requirements-dev.txt; do
+            if [ -f "$manifest" ] && { [ ! -e "$stamp" ] || [ "$manifest" -nt "$stamp" ]; }; then
+              stale=1
+            fi
+          done
+
+          if [ -n "$stale" ] && [ -z "''${DEV_NO_INSTALL:-}" ]; then
+            if [ -f uv.lock ] || grep -qs '^\[project\]' pyproject.toml; then
+              echo "installing dependencies with uv sync..."
+              if uv sync; then
+                touch "$stamp"
+              else
+                echo "uv sync failed; the shell is still here. Fix it and rerun it by hand." >&2
+              fi
+            else
+              args=()
+              for manifest in requirements.txt requirements-dev.txt; do
+                if [ -f "$manifest" ]; then
+                  args+=(-r "$manifest")
+                fi
+              done
+              if [ ''${#args[@]} -gt 0 ]; then
+                echo "installing dependencies from the requirements files..."
+                if uv pip install "''${args[@]}"; then
+                  touch "$stamp"
+                else
+                  echo "uv pip install failed; the shell is still here. Fix it and rerun it by hand." >&2
+                fi
+              fi
+            fi
+          fi
+          unset stamp stale manifest args
         '';
       };
     };

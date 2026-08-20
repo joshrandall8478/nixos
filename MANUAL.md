@@ -57,6 +57,7 @@ the machine.
   - [The one-command path](#the-one-command-path)
   - [The manual path](#the-manual-path)
   - [Day to day](#day-to-day)
+  - [Dependencies, on the way in](#dependencies-on-the-way-in)
   - [Why a project shell is instant](#why-a-project-shell-is-instant)
   - [Secrets](#secrets)
   - [A project that isn't yours](#a-project-that-isnt-yours)
@@ -4032,7 +4033,9 @@ dev-init python     # or: node, rust, go
 That copies a template's `flake.nix`, `.envrc` and `.gitignore` in and marks
 the `.envrc` trusted, so the shell is built and entered at the prompt you get
 back. Commit all three files — the whole point is that the next machine gets
-the same environment by cloning.
+the same environment by cloning, dependencies included: a language template
+installs those on the way in ([Dependencies, on the way
+in](#dependencies-on-the-way-in)).
 
 `dev-init` refuses to run where a `flake.nix` already exists rather than
 overwrite one.
@@ -4096,12 +4099,74 @@ check working, not a failure.
 Anything the project writes at runtime — a venv, `node_modules`, `GOPATH` —
 stays inside the project directory. The templates set that up and ignore the
 paths in `.gitignore`, because the Nix store is read-only and the alternative
-is a tool failing halfway through an install with a confusing error.
+is a tool failing halfway through an install with a confusing error. What goes
+*into* those directories is the next section.
+
+### Dependencies, on the way in
+
+Nix supplies the toolchain and the toolchain supplies the libraries. That
+split is deliberate: `requests` and `express` are not expressed as nix
+packages here, because the project already has a lockfile that decides which
+versions it wants, and restating it in `flake.nix` is a second source of truth
+to keep in step — one that the rest of the project's tooling, CI included,
+won't be reading. What the templates do instead is run the project's own
+installer on the way in, so a fresh clone is ready to run rather than ready to
+be set up:
+
+| template | what runs | when |
+|---|---|---|
+| node | `npm install` — or `pnpm`/`yarn`, whichever lockfile is committed | `package.json` or a lockfile is newer than the stamp, or `node_modules` is gone |
+| python | `uv sync` for a `uv.lock` or a pyproject with a `[project]` table; otherwise `uv pip install -r requirements.txt`, and `requirements-dev.txt` beside it if it exists | any of those is newer than the stamp, or the venv was rebuilt |
+| go | `go mod download` | `go.mod` or `go.sum` is newer than the stamp |
+| rust | `cargo fetch` | `Cargo.toml` or `Cargo.lock` is newer than the stamp |
+
+Go and Rust would fetch on demand anyway, at the first `go build` or `cargo
+build`. Doing it here doesn't add a capability, it moves the wait: to a prompt
+that is expecting one, rather than into the middle of the first build or the
+first test run.
+
+The stamp is an empty `.dev-shell-deps`, written inside the directory the tool
+already owns — `node_modules/`, `.venv/`, `.go/`, `target/`, all of them
+already in the template's `.gitignore`. It is touched only after an install
+that exited zero, and that is what makes any of this affordable in a hook that
+runs at every single prompt: the ordinary entry is a handful of `test`
+builtins and no subprocess at all. Two things follow from where it lives. An
+install that failed didn't write one, so the next entry tries again rather
+than recording a half-populated tree as done; and deleting the directory
+deletes the stamp with it, so `rm -rf node_modules` (or the venv rebuild the
+python template does on its own when the interpreter moves) is all it takes to
+force the install to happen again.
+
+Three deliberate limits:
+
+- **Nothing happens without a manifest.** `dev-init node` in an empty
+  directory leaves a shell to run `npm init` in — not a `package.json`
+  invented by a shellHook.
+- **A failure is a message, not a closed door.** An install that can't reach
+  the network says so and leaves the shell open with the toolchain on `PATH`,
+  which is the state you want to be in to debug it. The python template's
+  `uv venv` is the one exception, and only because a venv that doesn't exist
+  has nothing to activate.
+- **`DEV_NO_INSTALL=1` turns it off**, for one shell or exported for good, for
+  a project whose dependencies are being managed by hand.
+
+What deliberately doesn't run is `npm ci`, or `pnpm install
+--frozen-lockfile`, or their equivalents. Those are the CI commands: they fail
+outright when the lockfile and the manifest disagree, which is the ordinary
+state of a branch that has just added a dependency, and `npm ci` deletes
+`node_modules` before every install. Correct for a build that must be
+reproducible, wrong for something that happens on a `cd`.
+
+The generic template has none of this — it can't know what installing means
+for a project it knows nothing about — but its `shellHook` carries the same
+shape commented out, for the project whose bootstrap is a `make deps`.
 
 ### Why a project shell is instant
 
 Two things keep `direnv allow` down to a couple of seconds, and both are easy
-to undo by accident.
+to undo by accident. Neither covers the project's own dependencies — a first
+`npm install` takes what it takes — which is
+[Dependencies, on the way in](#dependencies-on-the-way-in) above.
 
 **The shell resolves to a nixpkgs the machine already has.** The templates say
 `inputs.nixpkgs.url = "nixpkgs"` — an indirect ref, which `development.nix`
@@ -4324,6 +4389,34 @@ flakes on if `nix flake init` refuses, and if direnv isn't hooked into the
 shell it says so and points at `nix develop` rather than quietly writing a
 template nothing will enter.
 
+**Keeping the profile current.** A nix profile follows nothing on its own. On
+the NixOS hosts everything installed moves together on a rebuild; here it's a
+command, and the thing worth knowing is what `upgrade` actually re-resolves:
+
+```bash
+nix profile list                # what's installed, and the flake each came from
+nix profile upgrade dev-init    # one entry, by the name that list prints
+nix profile upgrade --all       # every entry
+```
+
+`upgrade` goes back to the *original* ref an entry was installed from rather
+than the revision it locked at install time. So `dev-init` follows this repo's
+default branch and picks up whatever has landed there, and anything installed
+as `nixpkgs#…` — `nix-direnv` above, and `direnv` too if you took it from
+there rather than from pacman — follows whatever the bare `nixpkgs` resolves
+to on this machine: the global registry's `nixpkgs-unstable`, or the pin below
+if you added it, in which case they move when the pin is re-run and not
+before. Nix caches that resolution for `tarball-ttl`, an hour by default;
+`--refresh` is how you say you know something landed a minute ago. The
+`extra-substituters` question comes back on every `dev-init` upgrade, for the
+same reason it appeared on the install, and the answer is still no.
+
+The templates are not in the profile and never need upgrading. `dev-init`
+reads them from the flake ref at the moment you run it — `nix flake init -t
+"$flakeRef#$template"` — so `templates/` as it stands is what you get, subject
+to that same hour of tarball cache. Upgrading `dev-init` upgrades the script,
+not the shells it writes.
+
 **The registry pin buys less here.** On NixOS `development.nix` points the
 bare ref `nixpkgs` at the exact rev the machine is built from, and that is the
 whole reason a first `direnv allow` fetches nothing: the store is already made
@@ -4363,9 +4456,18 @@ hosts, Sunday morning, `--delete-older-than 14d`. On CachyOS nothing does, and
 nix-collect-garbage --delete-older-than 14d
 ```
 
-A systemd timer for it is worth the five minutes if the box is a daily driver.
-`keep-outputs` and `keep-derivations` are what stop that run taking the
-compilers out of a shell you still use, and nix-direnv's GC root under
+Profile generations are the other thing quietly holding paths down: every
+`nix profile add` and every upgrade writes one, each is a GC root until it is
+dropped, and a collection run against a profile with a year of history in it
+can look like it freed nothing at all.
+
+```bash
+nix profile wipe-history --older-than 14d
+```
+
+A systemd timer for the pair is worth the five minutes if the box is a daily
+driver. `keep-outputs` and `keep-derivations` are what stop that run taking
+the compilers out of a shell you still use, and nix-direnv's GC root under
 `.direnv/` is what stops it taking the shell itself — both matter more here
 than on NixOS, where they're set for you.
 

@@ -30,6 +30,21 @@
         # quiet and fast.
         shellHook = ''
           echo "dev shell: $(basename "$PWD")"
+
+          # Where a bootstrap step goes, if this project has one. The
+          # language templates each carry a real one — npm install, uv sync,
+          # go mod download — and all of them have this shape, because a
+          # hook that runs at every prompt can only afford to do the work
+          # when something actually changed. A stamp file, touched after the
+          # step succeeds, is what buys that; a failure is a message rather
+          # than something that stops the shell from opening; and
+          # DEV_NO_INSTALL=1 is the way out when the dependencies are being
+          # managed by hand.
+          #
+          # if [ -f Makefile ] && [ -z "''${DEV_NO_INSTALL:-}" ] &&
+          #    { [ ! -e .dev-shell-deps ] || [ Makefile -nt .dev-shell-deps ]; }; then
+          #   if make deps; then touch .dev-shell-deps; fi
+          # fi
         '';
 
         # Variables the project needs. These leave with the shell.
