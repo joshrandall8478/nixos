@@ -61,6 +61,7 @@ the machine.
   - [Secrets](#secrets)
   - [A project that isn't yours](#a-project-that-isnt-yours)
   - [VS Code](#vs-code)
+  - [Nix on a machine that isn't NixOS](#nix-on-a-machine-that-isnt-nixos)
 - [Gaming performance](#gaming-performance)
   - [`gaming-doctor`](#gaming-doctor)
   - [The controller, and the second cursor](#the-controller-and-the-second-cursor)
@@ -210,6 +211,10 @@ home/amandak/ home/sabom/          # the other two accounts, same shape each
   laptop-niri.nix server.nix       #   puts them on the same noctalia session
 home/root/
   home.nix                         # fish + starship only, no desktop
+packages/
+  dev-init.nix                     # the `dev-init` command, shared by
+                                   #   development.nix and the flake's
+                                   #   packages output
 templates/                         # `nix flake init -t` dev environments
   generic/ python/ node/ rust/ go/
 ```
@@ -3995,7 +4000,10 @@ What the module turns on:
   - Per-user tuning (`hide_env_diff`, `warn_timeout`) is a
     `~/.config/direnv/direnv.toml` thing that no system module can set.
 - **Docker** + docker-compose.
-- **`dev-init`**, the one-command path below.
+- **`dev-init`**, the one-command path below. It's a package in this flake
+  rather than a script written inline in the module, so the same command
+  installs on a machine that isn't NixOS — see [Nix on a machine that isn't
+  NixOS](#nix-on-a-machine-that-isnt-nixos).
 - The nix settings the rest depends on, all of which need root: `keep-outputs`
   and `keep-derivations`, without which garbage collection deletes the *build*
   inputs of a dev shell (a shell isn't a package, so nothing points at its
@@ -4028,6 +4036,12 @@ the same environment by cloning.
 
 `dev-init` refuses to run where a `flake.nix` already exists rather than
 overwrite one.
+
+On a machine without this module — the CachyOS box, anything with nix on it
+and no NixOS under it — the same command is
+`nix profile install github:joshrandall8478/nixos#dev-init` away, along with
+the rest of the setup it assumes: [Nix on a machine that isn't
+NixOS](#nix-on-a-machine-that-isnt-nixos).
 
 ### The manual path
 
@@ -4184,6 +4198,183 @@ direnv has already loaded is the quick way to tell the two apart.
 from `development.nix` rather than downloading its own — so on a host with
 that module still commented out, neither name resolves and both settings are
 inert.
+
+### Nix on a machine that isn't NixOS
+
+All of the above assumes NixOS, where `modules/nixos/development.nix` is a
+single import and everything it describes arrives with it. The CachyOS box is
+Arch underneath and nothing in this flake builds it, so the same setup is a
+handful of separate things done by hand. Only `dev-init` comes out of this
+repo; the rest is what that module arranges on your behalf, written out
+longhand.
+
+**Nix itself.** CachyOS carries `nix` in `extra`, which is the least
+surprising way to get it:
+
+```bash
+sudo pacman -S nix
+sudo systemctl enable --now nix-daemon.socket
+```
+
+The upstream installer is the alternative, and the one to reach for if the
+packaged nix ever lags behind what a flake needs:
+
+```bash
+curl -L https://nixos.org/nix/install | sh -s -- --daemon
+```
+
+Pick one. Both create `/nix` and a multi-user daemon, and having pacman and an
+installer receipt each believe they own that directory is a bad afternoon.
+
+Two Arch-specific things bite here and neither is nix's fault. The package
+ships none of the shell setup the upstream installer writes — that one adds
+`/etc/profile.d/nix.sh` and `/etc/fish/conf.d/nix.fish`, each sourcing a
+`nix-daemon.sh` or `.fish` out of nix's default profile. `nix` itself resolves
+either way, since pacman puts it in `/usr/bin`; what's missing is
+`~/.nix-profile/bin`, and that is where `nix profile install` puts what you
+install. Left out, `dev-init` below installs cleanly and is then not found.
+CachyOS defaults to fish, same as these machines, so in
+`~/.config/fish/config.fish`:
+
+```fish
+fish_add_path "$HOME/.nix-profile/bin"
+```
+
+or the equivalent `PATH` line in `~/.bashrc`. With the upstream installer
+none of that is needed, but its snippet only reaches shells started after it
+ran: a terminal that was already open when nix went in does not have it, and
+that is what an inexplicable "command not found" straight after an install
+usually is.
+
+The other one is the daemon socket, which used to be handed to a `nix-users`
+group that recent Arch packages no longer create. `getent group nix-users`
+says which world you're in: if it exists, `sudo usermod -aG nix-users "$USER"`
+and log back in; if it doesn't, skip it. A permission error on
+`/nix/var/nix/daemon-socket/socket` is what forgetting looks like.
+
+**The settings.** NixOS gets these from `base.nix` and
+`modules/nixos/development.nix`; here they're lines in `/etc/nix/nix.conf`,
+one per setting, using the same names the module does:
+
+```
+experimental-features = nix-command flakes
+keep-outputs = true
+keep-derivations = true
+log-lines = 25
+trusted-users = root joshr
+```
+
+`sudo systemctl restart nix-daemon` afterwards — the daemon reads that file at
+start, so an edit without a restart looks like the edit didn't take. The first
+line is the only one that isn't optional; the reasoning for the other four is
+in `development.nix` and applies unchanged, `keep-outputs` and
+`keep-derivations` especially, since a dev shell is a build environment and
+nothing points at it the way something points at a package.
+
+**direnv and nix-direnv.** `programs.direnv` installs both and writes the
+shell hooks; off NixOS that's two installs and two lines of config. direnv
+from pacman and nix-direnv from nix is the path of least resistance —
+nix-direnv isn't in the official repos, only the AUR, and direnv is in
+nixpkgs too if you'd rather have both from one place:
+
+```bash
+sudo pacman -S direnv
+nix profile install nixpkgs#nix-direnv
+```
+
+Then point direnv at nix-direnv in `~/.config/direnv/direnvrc`:
+
+```bash
+source "$HOME/.nix-profile/share/nix-direnv/direnvrc"
+```
+
+and hook direnv into the shell — `~/.config/fish/config.fish` again:
+
+```fish
+direnv hook fish | source
+```
+
+Without nix-direnv this all still works and is miserable: plain direnv
+re-evaluates `use flake` from scratch on every `cd`, and plants no GC root, so
+the shell you're working in is something garbage collection may delete.
+
+**`dev-init`.** The command itself is a package in this flake, so it installs
+from anywhere:
+
+```bash
+nix profile install github:joshrandall8478/nixos#dev-init
+```
+
+`nix run github:joshrandall8478/nixos#dev-init -- python` works too, without
+installing anything, but prefer the install: evaluating any output of this
+flake makes nix fetch every input in `flake.lock` first — the kernel flake,
+the dotfiles, the wallhaven listing, none of which `dev-init` touches — and
+`nix run` pays for that again each time its tarball cache lapses.
+
+Either way nix will have something to say about `extra-substituters`, which is
+this flake's `nixConfig` offering the CachyOS kernel's binary cache. That
+exists for the NixOS hosts' kernel and nothing in `dev-init` comes from it, so
+decline. Listed in `trusted-users` above you get a prompt; not listed, nix
+ignores it with a warning and the answer is the same.
+
+From there `dev-init python` behaves as it does on the desk. It's a little
+more careful off NixOS, because off NixOS the things it leans on can be
+missing: it checks for nix on `PATH` before doing anything, says where to turn
+flakes on if `nix flake init` refuses, and if direnv isn't hooked into the
+shell it says so and points at `nix develop` rather than quietly writing a
+template nothing will enter.
+
+**The registry pin buys less here.** On NixOS `development.nix` points the
+bare ref `nixpkgs` at the exact rev the machine is built from, and that is the
+whole reason a first `direnv allow` fetches nothing: the store is already made
+of those paths. A machine this flake doesn't build has no such store, so the
+first shell is a download whatever the registry says.
+
+What the pin still buys is agreement — a project locked on CachyOS against the
+same rev as one locked on the desk resolves to the same paths, and a later
+`nix flake update` in that project moves it with the machines rather than to
+whatever `nixpkgs-unstable` was that afternoon. If that's worth having:
+
+```bash
+rev=$(nix flake metadata github:joshrandall8478/nixos --json |
+        jq -r '.locks.nodes[.locks.nodes[.locks.root].inputs.nixpkgs].locked.rev')
+nix registry add nixpkgs "github:NixOS/nixpkgs/$rev"
+```
+
+Read the root node's `nixpkgs` input rather than `.locks.nodes.nixpkgs`,
+which is a different revision entirely. `nix-cachyos-kernel` deliberately does
+*not* follow this flake's nixpkgs — see the note on that input in `flake.nix`
+for why — so there are two of them in the lock, and the plain name went to the
+kernel's. The root node's own is `nixpkgs_2`, and nothing guarantees it keeps
+that name; the indirection above asks for whichever node the root actually
+points at.
+
+That writes `~/.config/nix/registry.json`, and it has to be re-run after a
+`nix flake update` here, which is the cost of it. Left alone,
+`inputs.nixpkgs.url = "nixpkgs"` in every template falls back to the global
+registry's `nixpkgs-unstable` and works — the templates are written so that's
+true.
+
+**Nothing collects the garbage.** `base.nix` runs `nix.gc` weekly on the NixOS
+hosts, Sunday morning, `--delete-older-than 14d`. On CachyOS nothing does, and
+`/nix` grows until asked not to:
+
+```bash
+nix-collect-garbage --delete-older-than 14d
+```
+
+A systemd timer for it is worth the five minutes if the box is a daily driver.
+`keep-outputs` and `keep-derivations` are what stop that run taking the
+compilers out of a shell you still use, and nix-direnv's GC root under
+`.direnv/` is what stops it taking the shell itself — both matter more here
+than on NixOS, where they're set for you.
+
+**What doesn't come across.** The fish functions — `nix-clean`,
+`nix-delete-gens`, the eza aliases — are home-manager, and this flake exposes
+no `homeConfigurations`, so there's nothing to install standalone. Adding that
+output is a separate change, and a non-NixOS host wants
+`targets.genericLinux.enable` with it. Docker, likewise, is pacman's problem
+on that machine rather than a line in `development.nix`.
 
 ## Gaming performance
 

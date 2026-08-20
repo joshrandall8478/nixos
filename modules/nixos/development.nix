@@ -22,60 +22,16 @@
 # this exists to support.
 let
   # One command to turn an empty directory into a working dev environment:
-  # copies a template from this flake and marks the .envrc trusted.
+  # copies a template from this flake and marks the .envrc trusted. The
+  # script, and the reasoning behind the shape it has, are in
+  # packages/dev-init.nix.
   #
-  # The templates come from this repo, so `dev-init` copies whatever
-  # templates/ currently holds rather than the copy frozen into whichever
-  # system generation happens to be booted. It had been pointing at a repo
-  # under a name this one no longer goes by. DEV_TEMPLATES_FLAKE overrides it
-  # with any flake ref.
-  #
-  # `nix` and `direnv` come from the ambient PATH rather than runtimeInputs on
-  # purpose — nix is the system daemon's client, and pinning a second copy
-  # into this script's closure would be a different nix from the one doing the
-  # build; direnv is enabled below, so its hook is already in the shell
-  # calling this.
-  devInit = pkgs.writeShellApplication {
-    name = "dev-init";
-    runtimeInputs = [ pkgs.coreutils ];
-    text = ''
-      templates="generic python node rust go"
-      flakeRef="''${DEV_TEMPLATES_FLAKE:-github:joshrandall8478/nixos}"
-      template="''${1:-generic}"
-
-      case " $templates " in
-        *" $template "*) ;;
-        *)
-          echo "unknown template: $template" >&2
-          echo "usage: dev-init [$(echo "$templates" | tr ' ' '|')]" >&2
-          exit 2
-          ;;
-      esac
-
-      if [ -e flake.nix ]; then
-        echo "flake.nix already exists here — refusing to overwrite it." >&2
-        echo "Edit it by hand, or run dev-init in a fresh directory." >&2
-        exit 1
-      fi
-
-      nix flake init -t "$flakeRef#$template"
-
-      # The templates ship an .envrc, but nix flake init won't clobber one
-      # that's already there.
-      if [ ! -e .envrc ]; then
-        printf 'use flake\n' > .envrc
-      fi
-
-      # Marks the .envrc trusted. It doesn't build anything itself — the
-      # shell's direnv hook does that at the next prompt, which is the one
-      # you get back when this exits.
-      direnv allow
-
-      echo
-      echo "Ready. Add packages to the devShell in flake.nix; direnv rebuilds"
-      echo "and re-enters the shell on save."
-    '';
-  };
+  # It's a package rather than something written inline here because flake.nix
+  # exposes the same derivation as `packages.x86_64-linux.dev-init`, so a
+  # machine that isn't NixOS — the CachyOS install, a work laptop — can have
+  # the command without having this module. Written twice it would drift; the
+  # two call sites are meant to be the same program.
+  devInit = pkgs.callPackage ../../packages/dev-init.nix { };
 in
 {
   # --- nix, tuned for per-project shells --------------------------------

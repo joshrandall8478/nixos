@@ -50,6 +50,7 @@ modules/nixos/     # the system side, imported per host
 home/common/       # home-manager bits shared by every account (shell, git, btop, tmux)
 home/<user>/       # one entrypoint file per host, e.g. home/joshr/gamestation.nix
 home/joshr/niri/   # the niri desktop: compositor, bar, themes, scripts
+packages/          # standalone derivations exposed as flake outputs (dev-init)
 templates/         # `nix flake init -t` dev environments
 ```
 
