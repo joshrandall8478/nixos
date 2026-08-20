@@ -423,6 +423,30 @@
         };
       };
 
+      # `dev-init` on its own, for a machine this flake does not build.
+      #
+      # The command normally arrives with modules/nixos/development.nix, in
+      # the system profile of whichever hosts have that import uncommented.
+      # That is no help on a machine running something else — the CachyOS
+      # install, a work laptop, a container — where there is nix and no
+      # NixOS. Exposing the same derivation as a package makes it reachable
+      # from any of them:
+      #
+      #     nix profile install github:joshrandall8478/nixos#dev-init
+      #     nix run github:joshrandall8478/nixos#dev-init -- python
+      #
+      # `profile install` is the one to prefer, and not only because it puts
+      # the command on PATH for good. Evaluating any output of this flake
+      # makes nix fetch every input in flake.lock first — the kernel flake,
+      # the dotfiles, the wallhaven listing, none of which this package
+      # touches — so `nix run` pays for the lot again each time its
+      # tarball-ttl lapses, and `profile install` pays once.
+      #
+      # The rest of what development.nix does — the nix.settings, direnv,
+      # the registry pin — has no package to install and has to be set up by
+      # hand there. See "Nix on a machine that isn't NixOS" in MANUAL.md.
+      packages.${system}.dev-init = pkgs.callPackage ./packages/dev-init.nix { };
+
       # Same program as `nixfmt-rfc-style`, under its own name. nixpkgs used
       # to carry two formatters — that one and a `nixfmt-classic` — and the
       # long name distinguished them; classic has since been removed and

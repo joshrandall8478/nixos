@@ -71,6 +71,7 @@ home/joshr/        # the user profile; one entrypoint file per host
 home/joshr/niri/   # the niri desktop: compositor, bar, themes, scripts
 home/amandak/      # the other accounts, each wearing the same profile
 home/sabom/
+packages/          # dev-init, shared by the module and the flake's outputs
 templates/         # `nix flake init -t` dev environments
 ```
 
@@ -80,6 +81,11 @@ templates/         # `nix flake init -t` dev environments
 Every option carries its reasoning in its `description`, and every module
 opens with a comment explaining what it's for.
 [The annotated file tree](MANUAL.md#whats-here) is in the manual.
+
+The dev-shell templates aren't NixOS-only: `dev-init` installs from this
+flake with `nix profile install github:joshrandall8478/nixos#dev-init` on
+any machine that has nix — see [Nix on a machine that isn't
+NixOS](MANUAL.md#nix-on-a-machine-that-isnt-nixos).
 
 ## Rebuilding
 
