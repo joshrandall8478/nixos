@@ -159,8 +159,8 @@ for.
 **3. direnv, nix-direnv and `dev-init`:**
 
 ```bash
-nix profile install nixpkgs#direnv nixpkgs#nix-direnv
-nix profile install github:joshrandall8478/nixos#dev-init
+nix profile add nixpkgs#direnv nixpkgs#nix-direnv
+nix profile add github:joshrandall8478/nixos#dev-init
 ```
 
 nix will have something to say about `extra-substituters` on the second one.
@@ -186,7 +186,7 @@ and `eval "$(direnv hook bash)"`.
 
 `fish_add_path` is the line people skip and then can't find `dev-init`: the
 pacman package ships none of the shell setup the upstream installer writes, so
-`~/.nix-profile/bin` — where `nix profile install` puts what you install —
+`~/.nix-profile/bin` — where `nix profile add` puts what you install —
 isn't on `PATH`. `nix` itself resolves either way, out of `/usr/bin`. The
 other Arch one: if `getent group nix-users` says that group exists, run
 `sudo usermod -aG nix-users "$USER"` and log back in, or every nix command
