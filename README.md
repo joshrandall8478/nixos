@@ -82,11 +82,6 @@ Every option carries its reasoning in its `description`, and every module
 opens with a comment explaining what it's for.
 [The annotated file tree](MANUAL.md#whats-here) is in the manual.
 
-The dev-shell templates aren't NixOS-only: `dev-init` installs from this
-flake with `nix profile install github:joshrandall8478/nixos#dev-init` on
-any machine that has nix — see [Nix on a machine that isn't
-NixOS](MANUAL.md#nix-on-a-machine-that-isnt-nixos).
-
 ## Rebuilding
 
 ```bash
@@ -104,6 +99,104 @@ nix flake update --refresh wallhaven-toplist  # a fresh top 20; --refresh matter
 `nix flake update` rewrites `flake.lock` — commit it alongside whatever
 prompted the update, so a build that works is a build you can get back to. If
 an update breaks something: `git checkout flake.lock` and rebuild.
+
+## Development environments
+
+No language toolchain is installed globally on any of these machines. A
+project declares what it needs in its own `flake.nix`, and direnv puts those
+tools on `PATH` when you `cd` in and takes them away again when you leave.
+`dev-init` writes that flake, an `.envrc` and a `.gitignore`, and marks the
+`.envrc` trusted:
+
+```bash
+dev-init            # generic skeleton
+dev-init python     # or: node, rust, go
+```
+
+On the NixOS hosts it arrives with `modules/nixos/development.nix`, whose
+import is commented out per host — uncomment it on the machines you actually
+develop on. Anywhere else nix is a package like any other and the module's
+contents are four steps by hand. Same templates, same `dev-init`.
+
+**1. Nix.** On CachyOS, or anything else Arch-based:
+
+```bash
+sudo pacman -S nix
+sudo systemctl enable --now nix-daemon.socket
+```
+
+On Debian, Ubuntu, Fedora and the rest, the upstream installer — it creates
+`/nix`, a multi-user daemon and the shell setup in one go:
+
+```bash
+curl -L https://nixos.org/nix/install | sh -s -- --daemon
+```
+
+One or the other, never both: two things each believing they own `/nix` is a
+bad afternoon. Either way nix isn't in the shell you ran that from — open a
+new one.
+
+**2. `/etc/nix/nix.conf`** — the `nix.settings` from `base.nix` and
+`development.nix`, written longhand:
+
+```bash
+sudo tee -a /etc/nix/nix.conf <<'EOF'
+experimental-features = nix-command flakes
+keep-outputs = true
+keep-derivations = true
+log-lines = 25
+trusted-users = root joshr
+EOF
+sudo systemctl restart nix-daemon
+```
+
+Only the first line is mandatory. `keep-outputs` and `keep-derivations` are
+what stop garbage collection taking the compilers out of a dev shell — a shell
+is a build environment rather than a package, so nothing points at it
+otherwise. The daemon reads that file at start, which is what the restart is
+for.
+
+**3. direnv, nix-direnv and `dev-init`:**
+
+```bash
+nix profile install nixpkgs#direnv nixpkgs#nix-direnv
+nix profile install github:joshrandall8478/nixos#dev-init
+```
+
+nix will have something to say about `extra-substituters` on the second one.
+That's this flake's `nixConfig` offering the CachyOS kernel's binary cache,
+which nothing in `dev-init` comes from — decline it.
+
+**4. Three lines of shell config.** CachyOS defaults to fish, same as these
+machines, so `~/.config/fish/config.fish`:
+
+```fish
+fish_add_path "$HOME/.nix-profile/bin"
+direnv hook fish | source
+```
+
+and `~/.config/direnv/direnvrc`, which is what points direnv at nix-direnv:
+
+```bash
+source "$HOME/.nix-profile/share/nix-direnv/direnvrc"
+```
+
+Under bash or zsh those first two are `export PATH="$HOME/.nix-profile/bin:$PATH"`
+and `eval "$(direnv hook bash)"`.
+
+`fish_add_path` is the line people skip and then can't find `dev-init`: the
+pacman package ships none of the shell setup the upstream installer writes, so
+`~/.nix-profile/bin` — where `nix profile install` puts what you install —
+isn't on `PATH`. `nix` itself resolves either way, out of `/usr/bin`. The
+other Arch one: if `getent group nix-users` says that group exists, run
+`sudo usermod -aG nix-users "$USER"` and log back in, or every nix command
+fails on the daemon socket.
+
+[Development environments](MANUAL.md#development-environments) is the
+per-project workflow, and [Nix on a machine that isn't
+NixOS](MANUAL.md#nix-on-a-machine-that-isnt-nixos) is the rest of this — the
+optional `nixpkgs` registry pin, garbage collection (nothing runs it there),
+and what doesn't come across.
 
 ## Before you build this
 
@@ -164,6 +257,7 @@ walks the whole thing from a live ISO.
   [the Steam controller](MANUAL.md#the-controller-and-the-second-cursor) ·
   [the kernel](MANUAL.md#the-kernel) ·
   [development environments](MANUAL.md#development-environments) ·
+  [nix on other distros](MANUAL.md#nix-on-a-machine-that-isnt-nixos) ·
   [local AI](MANUAL.md#local-ai) ·
   [the NVIDIA server](MANUAL.md#the-nvidia-server) ·
   [single GPU passthrough](MANUAL.md#single-gpu-passthrough) ·
