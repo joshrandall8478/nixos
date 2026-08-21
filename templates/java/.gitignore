@@ -1,0 +1,20 @@
+# Built by nix-direnv when you cd in. Holds the GC root for this
+# project's dev shell.
+.direnv/
+
+# nix build output symlink.
+result
+result-*
+
+# Maven's local repository and Gradle's user home, redirected here by
+# the shellHook so they stay out of $HOME.
+.m2/
+.gradle-home/
+
+# Gradle's own project cache — a different directory with a different
+# lifetime, which is why it has a different name.
+.gradle/
+
+# Build output: target/ is Maven's, build/ is Gradle's.
+target/
+build/
