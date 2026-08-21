@@ -18,7 +18,7 @@
     {
       devShells.${system}.default = pkgs.mkShell {
         packages = with pkgs; [
-          nodejs_22
+          nodejs_26
           pnpm # swap for `yarn`, or drop it and use the bundled npm
           typescript-language-server
         ];
