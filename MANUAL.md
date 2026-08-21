@@ -56,6 +56,7 @@ the machine.
   - [One import, and it's off by default](#one-import-and-its-off-by-default)
   - [The one-command path](#the-one-command-path)
   - [The manual path](#the-manual-path)
+  - [The systems a template builds for](#the-systems-a-template-builds-for)
   - [Day to day](#day-to-day)
   - [Dependencies, on the way in](#dependencies-on-the-way-in)
   - [Which version a template starts on](#which-version-a-template-starts-on)
@@ -64,6 +65,7 @@ the machine.
   - [A project that isn't yours](#a-project-that-isnt-yours)
   - [VS Code](#vs-code)
   - [Nix on a machine that isn't NixOS](#nix-on-a-machine-that-isnt-nixos)
+  - [Nix on macOS](#nix-on-macos)
 - [Gaming performance](#gaming-performance)
   - [`gaming-doctor`](#gaming-doctor)
   - [The controller, and the second cursor](#the-controller-and-the-second-cursor)
@@ -4059,19 +4061,21 @@ Two files. `flake.nix`:
 
   outputs = { nixpkgs, ... }:
     let
-      system = "x86_64-linux";
-      pkgs = nixpkgs.legacyPackages.${system};
+      systems = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
+      forEachSystem = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
     in {
-      devShells.${system}.default = pkgs.mkShell {
-        packages = with pkgs; [ python313 postgresql ];
+      devShells = forEachSystem (pkgs: {
+        default = pkgs.mkShell {
+          packages = with pkgs; [ python313 postgresql ];
 
-        # Exported on entry, gone on exit.
-        env.DATABASE_URL = "postgres://localhost/dev";
+          # Exported on entry, gone on exit.
+          env.DATABASE_URL = "postgres://localhost/dev";
 
-        shellHook = ''
-          echo "ready"
-        '';
-      };
+          shellHook = ''
+            echo "ready"
+          '';
+        };
+      });
     };
 }
 ```
@@ -4086,6 +4090,77 @@ Then `direnv allow`. direnv refuses to run an `.envrc` it hasn't been told to
 trust — that message on first entry, and after every edit, is the safety
 check working, not a failure.
 
+The two lines of `let` are the whole of what makes that flake portable: a
+flake output is addressed by system, `nix develop` and direnv ask for the one
+they are running on, and `genAttrs` writes the same shell under each name in
+the list. A single hard-coded `system = "x86_64-linux"` is shorter and works
+until the day the project is opened on a different machine, which then gets
+"does not provide attribute devShells.aarch64-darwin.default" and no shell at
+all. [The systems a template builds
+for](#the-systems-a-template-builds-for) is the same list from the templates'
+side.
+
+### The systems a template builds for
+
+Every template's `outputs` opens with the same two lines:
+
+```nix
+systems = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
+forEachSystem = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
+```
+
+x86_64-linux is the desktops and the server, aarch64-linux an ARM Linux box,
+aarch64-darwin an Apple Silicon Mac. `dev-init` is published for the same
+three — `packages.<system>.dev-init`, which is the attribute `nix run` and
+`nix profile add` look up under the name of the system they are run on, and
+`formatter.<system>` for `nix fmt` beside it. A system nobody names isn't
+unsupported in any deep sense; it's an attribute nobody wrote, and nix reports
+that as "flake does not provide attribute", which reads like the tool refusing
+rather than a missing line.
+
+Listing a system costs an entry in an attrset and nothing else: nothing is
+built until something asks for it by name, so a Mac shell on a machine that
+will never be one is never evaluated. Trimming the list is therefore not an
+optimisation, and the only thing it can do is take a machine's shell away.
+The one place the whole list *is* evaluated is `nix flake check` in the
+project, which is exactly what you want from it: one command that says every
+machine on the list can still build the shell.
+
+**x86_64-darwin is the deliberate omission**, and unlike the rest of this it
+isn't a line anyone can add. nixpkgs 26.11 — the unstable branch this flake
+and every template's `inputs.nixpkgs` follow — dropped the platform outright.
+Asking it for that system throws before a single package is named:
+
+```
+error: Nixpkgs 26.11 has dropped support for x86_64-darwin.
+
+       The 26.05 stable branch still supports x86_64-darwin, and will
+       receive security fixes until the end of 2026.
+```
+
+So an Intel Mac is not a fourth entry in `systems`; it's a project pointing
+`inputs.nixpkgs` at `nixpkgs/nixpkgs-26.05-darwin` and living on a stable
+branch, and it stops being possible at all when those fixes do.
+
+**One tool is missing on Apple Silicon**, and the dotnet template drops it
+rather than failing over it. `csharp-ls` is marked
+`badPlatforms = [ "aarch64-darwin" ]` in nixpkgs — it builds there and then
+dies on the first request — so the template asks
+`lib.meta.availableOn pkgs.stdenv.hostPlatform pkgs.csharp-ls` and includes
+the server only where the answer is yes. Naming it unconditionally would make
+the entire shell an evaluation error on that machine, which is a poor trade
+for one editor integration; asking rather than matching on the system by hand
+means the day nixpkgs drops the mark, the server comes back with a
+`nix flake update` and no edit here. `roslyn-ls` is the one to add there if
+you want a server: same one the official C# extension ships, heavier to wire
+up, launched as `Microsoft.CodeAnalysis.LanguageServer --stdio`.
+
+Everything else the templates name is the same attribute on every system in
+the list. What is *not* the same is how much of it is already on the machine:
+the registry pin below is a NixOS thing, so on the Mac and the ARM box the
+first `direnv allow` is a download, exactly as it is on the CachyOS install.
+See [Nix on a machine that isn't NixOS](#nix-on-a-machine-that-isnt-nixos).
+
 ### Day to day
 
 | | |
@@ -4096,7 +4171,8 @@ check working, not a failure.
 | update them | `nix flake update`, or `nix flake update nixpkgs` for one input |
 | force a rebuild | `direnv reload` |
 | run one command without entering | `nix develop -c pytest` |
-| a second shell (e.g. CI) | `devShells.${system}.ci = ...`, entered with `use flake .#ci` |
+| a second shell (e.g. CI) | a second attribute beside `default` in the `forEachSystem` block, entered with `use flake .#ci` |
+| build on another machine | add its system to `systems` at the top of the flake |
 
 Anything the project writes at runtime — a venv, `node_modules`, `GOPATH`,
 the NuGet cache, Maven's repository, Gradle's user home, Zig's package cache —
@@ -4246,6 +4322,19 @@ has to happen at build time:
 
 The first SDK listed is the one whose `dotnet` ends up on `PATH`.
 
+**One of those attributes means something different on macOS.** `jdk25` on
+Linux is `openjdk-25`; on darwin it's `zulu-ca-jdk-25`, because nixpkgs has no
+darwin source build of OpenJDK and every `jdkNN` there is Azul's tarball,
+patched and packaged. It behaves the same from the template's side — Zulu
+unpacks as a .jdk bundle and symlinks its Contents/Home into the package root,
+so `jdk.home` is that root either way and `env.JAVA_HOME` needs no special
+case — but the exact build is Azul's to publish, so the two platforms can sit
+on different patch releases. The .NET SDK is *not* in that position: nixpkgs'
+source build covers aarch64-darwin, so `dotnet-sdk_10` on the Mac is the same
+package as on the desktops. Its language server is the part that differs,
+in [The systems a template builds
+for](#the-systems-a-template-builds-for).
+
 ### Why a project shell is instant
 
 Two things keep `direnv allow` down to a couple of seconds, and both are easy
@@ -4300,6 +4389,10 @@ When a shell is unexpectedly slow, this says what it's about to do:
 ```bash
 nix build --dry-run .#devShells.x86_64-linux.default
 ```
+
+The attribute names a system, so on the Mac that middle component is
+`aarch64-darwin` and on the ARM box `aarch64-linux` — `nix eval --impure
+--expr builtins.currentSystem` prints the one you're on.
 
 Paths under "will be fetched" are a download. Anything under "will be built"
 that isn't your own package is a set that nobody cached.
@@ -4562,6 +4655,78 @@ no `homeConfigurations`, so there's nothing to install standalone. Adding that
 output is a separate change, and a non-NixOS host wants
 `targets.genericLinux.enable` with it. Docker, likewise, is pacman's problem
 on that machine rather than a line in `development.nix`.
+
+### Nix on macOS
+
+The section above applies on an Apple Silicon Mac too — the nix.conf
+settings, direnv and nix-direnv, `dev-init`, keeping the profile current —
+with the Arch-specific halves (pacman, the `nix-users` group) simply not
+arising, and five differences worth writing down. `dev-init` and the templates
+are built for aarch64-darwin, [The systems a template builds
+for](#the-systems-a-template-builds-for), so the commands themselves are the
+same ones.
+
+**The install is the upstream installer, and `/nix` is a volume.** There is no
+package manager to take it from, and Homebrew is not it:
+
+```bash
+curl -L https://nixos.org/nix/install | sh -s -- --daemon
+```
+
+On macOS the root filesystem is sealed, so the installer cannot simply make a
+directory at `/nix`: it creates a dedicated APFS volume, declares the empty
+mount point in `/etc/synthetic.conf`, and mounts the volume there at boot.
+That is the part to know before uninstalling — deleting the directory is not
+what removes it, and the installer's own script prints the volume, the
+`synthetic.conf` line and the daemon as three separate things to undo — and it
+is why the install asks for more consent than it does on Linux. Determinate
+Systems' installer is the other option and handles both the volume and the
+uninstall more gracefully; either produces the same `/nix` and the same daemon.
+
+**zsh is the login shell, and macOS rewrites its config.** The installer adds
+its snippet to `/etc/zshrc` and `/etc/bashrc`, and a macOS update can replace
+those files wholesale and take the snippet with it. Every nix command then
+stops resolving on a machine where nothing was uninstalled — which is what
+`dev-init` prints the fix for when it can't find `nix` on `PATH`:
+
+```zsh
+# Nix
+if [ -e '/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh' ]; then
+  . '/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh'
+fi
+# End Nix
+```
+
+Putting it in `~/.zshrc` instead of `/etc/zshrc` survives the next update.
+Fish, if you install it, still wants the `fish_add_path` and `direnv hook
+fish` lines from the section above.
+
+**The settings file is the same, the daemon restart isn't.** `/etc/nix/nix.conf`
+takes exactly the lines listed above, `experimental-features` included, but
+launchd owns the daemon:
+
+```bash
+sudo launchctl kickstart -k system/org.nixos.nix-daemon
+```
+
+`trusted-users = root <you>` matters here for the same reason it does there,
+and `nix.conf` is per-user at `~/.config/nix/nix.conf` if all you need is
+`experimental-features`.
+
+**The first shell is a download, and a longer one.** The registry pin is a
+NixOS convenience — this flake's `development.nix` points the bare `nixpkgs`
+ref at the rev the machine is built from — and a Mac has no such store to
+resolve into. What arrives from `cache.nixos.org` for aarch64-darwin is also a
+smaller set than for x86_64-linux, so a template naming something Hydra
+doesn't build for darwin compiles locally. `nix build --dry-run
+.#devShells.aarch64-darwin.default` before the first `direnv allow` is how you
+find out which it is.
+
+**Docker doesn't come across at all.** `virtualisation.nix` is a NixOS module,
+and a Mac wants Docker Desktop, Colima or OrbStack, none of which nix installs
+for you. That is the same division as everywhere else here — a dev shell is
+for tools, and a service that needs a daemon is Compose's problem rather than
+the shell's.
 
 ## Gaming performance
 

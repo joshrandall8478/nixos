@@ -10,11 +10,18 @@
 # It lives in its own file rather than inside modules/nixos/development.nix
 # because it has two consumers. That module puts it in the system profile on
 # the NixOS hosts, which is where it's normally met; flake.nix also exposes
-# this derivation as `packages.x86_64-linux.dev-init`, which is what makes it
-# reachable from a machine this flake doesn't build — the CachyOS install, a
-# work laptop, a container with nothing on it but nix:
+# this derivation as `packages.<system>.dev-init` for each of its
+# `devSystems` — x86_64-linux, aarch64-linux and aarch64-darwin — which is
+# what makes it reachable from a machine this flake doesn't build: the
+# CachyOS install, a work laptop, an ARM box, an Apple Silicon Mac, a
+# container with nothing on it but nix.
 #
 #     nix run github:joshrandall8478/nixos#dev-init -- python
+#
+# Nothing in the script is platform-specific — it is bash, coreutils and two
+# commands it looks up on PATH — but the flake output has to name a system
+# before `nix run` on that system can find it, which is why that list exists
+# and why it is longer than the hosts'.
 #
 # See "Nix on a machine that isn't NixOS" in MANUAL.md for the rest of that
 # setup, which is mostly the nix.conf half of modules/nixos/development.nix.
@@ -77,6 +84,21 @@ writeShellApplication {
       echo "it did — open a new login shell, or source its snippet here:" >&2
       echo >&2
       echo "    . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh" >&2
+      # Same path on macOS, but there the line that sources it lives in
+      # /etc/zshrc, which a macOS update replaces wholesale — so on that
+      # machine "it worked yesterday" is a real answer and the fix is to put
+      # the line back, not to reinstall nix.
+      if [ "$(uname -s)" = Darwin ]; then
+        echo >&2
+        echo "A macOS update can replace /etc/zshrc and drop the line that" >&2
+        echo "does this at login. If that's what happened, add it back:" >&2
+        echo >&2
+        echo "    # Nix" >&2
+        echo "    if [ -e '/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh' ]; then" >&2
+        echo "      . '/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh'" >&2
+        echo "    fi" >&2
+        echo "    # End Nix" >&2
+      fi
       exit 1
     fi
 

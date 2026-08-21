@@ -27,10 +27,12 @@ let
   # packages/dev-init.nix.
   #
   # It's a package rather than something written inline here because flake.nix
-  # exposes the same derivation as `packages.x86_64-linux.dev-init`, so a
-  # machine that isn't NixOS — the CachyOS install, a work laptop — can have
-  # the command without having this module. Written twice it would drift; the
-  # two call sites are meant to be the same program.
+  # exposes the same derivation as `packages.<system>.dev-init` for each of its
+  # `devSystems` — x86_64-linux, aarch64-linux and aarch64-darwin — so a
+  # machine that isn't NixOS, whether the CachyOS install, a work laptop or an
+  # Apple Silicon Mac, can have the command without having this module.
+  # Written twice it would drift; the two call sites are meant to be the same
+  # program.
   devInit = pkgs.callPackage ../../packages/dev-init.nix { };
 in
 {
