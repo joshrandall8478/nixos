@@ -544,6 +544,15 @@
       # the flake has no such package, which reads as "this doesn't work
       # here" and is really "nobody wrote the line".
       #
+      # That message outlives the fix, which is the part worth knowing. A
+      # `github:` ref with no revision is resolved to one and then cached for
+      # `tarball-ttl`, an hour by default, so for an hour after a line lands
+      # here nix answers out of the copy it already has and prints exactly
+      # the same "does not provide attribute" for a system that now works.
+      # `--refresh` on the command is what says the branch moved a minute
+      # ago. See "When nix says the flake has no such attribute" in
+      # MANUAL.md.
+      #
       # `profile install` is the one to prefer, and not only because it puts
       # the command on PATH for good. Evaluating any output of this flake
       # makes nix fetch every input in flake.lock first — the kernel flake,
@@ -554,9 +563,23 @@
       # The rest of what development.nix does — the nix.settings, direnv,
       # the registry pin — has no package to install and has to be set up by
       # hand there. See "Nix on a machine that isn't NixOS" in MANUAL.md.
-      packages = forEachDevSystem (pkgs: {
-        dev-init = pkgs.callPackage ./packages/dev-init.nix { };
-      });
+      packages = forEachDevSystem (
+        pkgs:
+        let
+          dev-init = pkgs.callPackage ./packages/dev-init.nix { };
+        in
+        {
+          inherit dev-init;
+
+          # The same derivation under the name nix falls back to when a
+          # command names no attribute at all, so
+          # `nix run github:joshrandall8478/nixos -- python` finds it as well
+          # as the `#dev-init` spelling above. One package, two ways of
+          # asking; a second package would want this line reconsidered rather
+          # than copied.
+          default = dev-init;
+        }
+      );
 
       # Same program as `nixfmt-rfc-style`, under its own name. nixpkgs used
       # to carry two formatters — that one and a `nixfmt-classic` — and the

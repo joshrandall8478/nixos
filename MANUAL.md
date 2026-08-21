@@ -65,6 +65,7 @@ the machine.
   - [A project that isn't yours](#a-project-that-isnt-yours)
   - [VS Code](#vs-code)
   - [Nix on a machine that isn't NixOS](#nix-on-a-machine-that-isnt-nixos)
+  - [When nix says the flake has no such attribute](#when-nix-says-the-flake-has-no-such-attribute)
   - [Nix on macOS](#nix-on-macos)
 - [Gaming performance](#gaming-performance)
   - [`gaming-doctor`](#gaming-doctor)
@@ -4656,15 +4657,71 @@ output is a separate change, and a non-NixOS host wants
 `targets.genericLinux.enable` with it. Docker, likewise, is pacman's problem
 on that machine rather than a line in `development.nix`.
 
+### When nix says the flake has no such attribute
+
+```
+error: flake 'github:joshrandall8478/nixos' does not provide attribute
+       'packages.aarch64-darwin.dev-init', 'legacyPackages.aarch64-darwin.dev-init'
+       or 'dev-init'
+```
+
+Read that as a question about *which copy of the flake* nix is holding, not
+about the platform it names. The system in the attribute path is just the one
+you're on; the same message appears on x86_64-linux, with x86_64-linux in it,
+whenever the attribute genuinely isn't there.
+
+**A `github:` ref with no revision is resolved once and then cached.** Nix
+turns `github:joshrandall8478/nixos` into a specific commit, and keeps that
+answer for `tarball-ttl` — an hour, by default. Inside that hour it does not
+ask GitHub what the branch points at now; it evaluates the copy it already
+has. So for up to an hour after an output lands on `main`, every machine that
+ran the command before the merge is told the flake doesn't provide it, and
+nothing about the message says the answer is stale.
+
+`--refresh` is how you say the branch moved a minute ago:
+
+```bash
+nix run --refresh github:joshrandall8478/nixos#dev-init -- python
+nix profile install --refresh github:joshrandall8478/nixos#dev-init
+```
+
+and this says which commit nix is actually holding, which is the quickest way
+to tell a stale cache from a real absence:
+
+```bash
+nix flake metadata --refresh github:joshrandall8478/nixos
+```
+
+`Locked URL` and `Revision` in that output name the commit nix resolved to,
+and `Last modified` gives its date — a timestamp older than the change you're
+looking for is the whole diagnosis. If it *is* the commit you expected and the
+attribute is still missing, the flake really doesn't have it, and `nix flake
+show` lists what it does.
+
+Two related caches, for completeness. The templates come through the same
+door: `dev-init` runs `nix flake init -t "$flakeRef#$template"`, so a template
+edited and pushed a minute ago arrives on the same hour's delay. Pointing
+`DEV_TEMPLATES_FLAKE` at a local checkout skips the round trip entirely while
+you're working on one:
+
+```bash
+DEV_TEMPLATES_FLAKE=path:/home/joshr/nixos dev-init python
+```
+
+And `nix profile upgrade` re-resolves the *original* ref rather than the
+revision it locked, so it is subject to this as well — the "keeping the
+profile current" note in [Nix on a machine that isn't
+NixOS](#nix-on-a-machine-that-isnt-nixos) is the longer version.
+
 ### Nix on macOS
 
-The section above applies on an Apple Silicon Mac too — the nix.conf
-settings, direnv and nix-direnv, `dev-init`, keeping the profile current —
-with the Arch-specific halves (pacman, the `nix-users` group) simply not
-arising, and five differences worth writing down. `dev-init` and the templates
-are built for aarch64-darwin, [The systems a template builds
-for](#the-systems-a-template-builds-for), so the commands themselves are the
-same ones.
+[Nix on a machine that isn't NixOS](#nix-on-a-machine-that-isnt-nixos) applies
+on an Apple Silicon Mac too — the nix.conf settings, direnv and nix-direnv,
+`dev-init`, keeping the profile current — with the Arch-specific halves
+(pacman, the `nix-users` group) simply not arising, and five differences worth
+writing down. `dev-init` and the templates are built for aarch64-darwin, [The
+systems a template builds for](#the-systems-a-template-builds-for), so the
+commands themselves are the same ones.
 
 **The install is the upstream installer, and `/nix` is a volume.** There is no
 package manager to take it from, and Homebrew is not it:

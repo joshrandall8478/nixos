@@ -199,6 +199,14 @@ nix will have something to say about `extra-substituters` on the second one.
 That's this flake's `nixConfig` offering the CachyOS kernel's binary cache,
 which nothing in `dev-init` comes from — decline it.
 
+If that second command answers `does not provide attribute
+'packages.<your system>.dev-init'`, the flake nix is holding is an older one:
+a `github:` ref with no revision is resolved once and cached for an hour, so a
+change that landed on `main` minutes ago isn't in the copy being evaluated.
+Add `--refresh`. [When nix says the flake has no such
+attribute](MANUAL.md#when-nix-says-the-flake-has-no-such-attribute) is the
+longer version, including how to see which commit nix actually has.
+
 **4. Three lines of shell config.** CachyOS defaults to fish, same as these
 machines, so `~/.config/fish/config.fish`:
 
