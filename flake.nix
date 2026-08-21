@@ -379,11 +379,18 @@
       #
       # Each language template's shellHook also installs the project's own
       # dependencies on the way in — npm install, uv sync or a requirements
-      # file, go mod download, cargo fetch — guarded by a stamp file so an
-      # ordinary entry costs no subprocess at all, and by DEV_NO_INSTALL=1
+      # file, go mod download, cargo fetch, dotnet restore, Maven or Gradle,
+      # gleam deps download, zig build --fetch — guarded by a stamp file so
+      # an ordinary entry costs no subprocess at all, and by DEV_NO_INSTALL=1
       # for a project whose dependencies are being managed by hand. Nix
       # brings the toolchain and the toolchain brings the libraries, so a
       # project's own lockfile stays the thing that decides.
+      #
+      # Where a template names a version it names the newest one nixpkgs
+      # builds, which is often not the attribute nixpkgs leaves unsuffixed:
+      # `dotnet-sdk`, `jdk` and `gradle` all still point at older releases,
+      # so dotnet, java and their like spell the version out. Each says why
+      # in a comment beside the line.
       templates = {
         default = self.templates.generic;
 
@@ -407,7 +414,7 @@
 
         node = {
           path = ./templates/node;
-          description = "Node.js 22 with pnpm and the TypeScript language server";
+          description = "Node.js 26 with pnpm and the TypeScript language server";
           welcomeText = ''
             `direnv allow` to enter. node_modules is installed on entry and
             refreshed whenever package.json or the lockfile moves, and npm's
@@ -432,6 +439,51 @@
           welcomeText = ''
             `direnv allow` to enter. GOPATH is redirected into the project,
             and the module cache is filled on the way in.
+          '';
+        };
+
+        dotnet = {
+          path = ./templates/dotnet;
+          description = ".NET SDK 10 with csharp-ls and a project-local NuGet cache";
+          welcomeText = ''
+            `direnv allow` to enter. The SDK's home and the NuGet cache are
+            redirected into the project, and `dotnet restore` runs on entry
+            for a solution or project file at the root. Multi-targeting
+            wants `dotnetCorePackages.combinePackages` — see the comment by
+            the `dotnet` binding in flake.nix.
+          '';
+        };
+
+        java = {
+          path = ./templates/java;
+          description = "JDK 25 with Maven, Gradle 9 and the Eclipse JDT language server";
+          welcomeText = ''
+            `direnv allow` to enter. Whichever build tool the project commits
+            is the one that runs — a pom.xml means Maven, Gradle scripts mean
+            Gradle, and a committed mvnw/gradlew wins over the copy in the
+            shell. Maven's repository and Gradle's user home are redirected
+            into the project.
+          '';
+        };
+
+        gleam = {
+          path = ./templates/gleam;
+          description = "Gleam with Erlang/OTP and rebar3 for the BEAM target";
+          welcomeText = ''
+            `direnv allow` to enter; `gleam deps download` runs on the way
+            in. The language server is `gleam lsp`, part of the same binary.
+            Compiling to JavaScript instead needs a runtime added to
+            `packages` — nodejs, bun or deno.
+          '';
+        };
+
+        zig = {
+          path = ./templates/zig;
+          description = "Zig 0.16 with a matching zls";
+          welcomeText = ''
+            `direnv allow` to enter. The packages build.zig.zon declares are
+            fetched on the way in, into a cache redirected under the project.
+            Keep zig and zls on the same release if you pin either.
           '';
         };
       };

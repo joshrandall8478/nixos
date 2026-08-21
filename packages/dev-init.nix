@@ -38,7 +38,7 @@ writeShellApplication {
   name = "dev-init";
   runtimeInputs = [ coreutils ];
   text = ''
-    templates="generic python node rust go"
+    templates="generic python node rust go dotnet java gleam zig"
     flakeRef="''${DEV_TEMPLATES_FLAKE:-github:joshrandall8478/nixos}"
     template="''${1:-generic}"
 

@@ -110,7 +110,7 @@ tools on `PATH` when you `cd` in and takes them away again when you leave.
 
 ```bash
 dev-init            # generic skeleton
-dev-init python     # or: node, rust, go
+dev-init python     # or: node, rust, go, dotnet, java, gleam, zig
 ```
 
 The language templates go a step further than putting the toolchain on `PATH`:
@@ -118,10 +118,17 @@ entering the shell also installs the project's own dependencies, so a fresh
 clone is ready to run. `npm install` when `node_modules` is missing or
 `package.json` moved (`pnpm` or `yarn` if that's the committed lockfile),
 `uv sync` or `uv pip install -r requirements.txt`, `go mod download`,
-`cargo fetch`. A stamp file keeps an ordinary `cd` free of all of it,
-`DEV_NO_INSTALL=1` turns it off, and a failed install is a message rather than
-a shell that won't open —
+`cargo fetch`, `dotnet restore`, `mvn dependency:go-offline` or its Gradle
+equivalent, `gleam deps download`, `zig build --fetch`. A stamp file keeps an
+ordinary `cd` free of all of it, `DEV_NO_INSTALL=1` turns it off, and a failed
+install is a message rather than a shell that won't open —
 [Dependencies, on the way in](MANUAL.md#dependencies-on-the-way-in).
+
+Each one starts on the newest toolchain nixpkgs builds, which is often not the
+attribute nixpkgs leaves unsuffixed — `dotnet-sdk` is still 8.0, `jdk` is 21,
+`gradle` is 8 — so the templates that need to spell a version out do, and say
+why beside the line: [Which version a template starts
+on](MANUAL.md#which-version-a-template-starts-on).
 
 On the NixOS hosts it arrives with `modules/nixos/development.nix`, whose
 import is commented out per host — uncomment it on the machines you actually

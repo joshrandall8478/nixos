@@ -1,0 +1,16 @@
+# Built by nix-direnv when you cd in. Holds the GC root for this
+# project's dev shell.
+.direnv/
+
+# nix build output symlink.
+result
+result-*
+
+# The SDK's own state and the NuGet cache, redirected here by the
+# shellHook so they stay out of $HOME.
+.dotnet/
+.nuget/
+
+# MSBuild's output and intermediates.
+bin/
+obj/

@@ -1,0 +1,15 @@
+# Built by nix-direnv when you cd in. Holds the GC root for this
+# project's dev shell.
+.direnv/
+
+# nix build output symlink.
+result
+result-*
+
+# Zig's build artifacts, and the install prefix `zig build` writes to.
+.zig-cache/
+zig-out/
+
+# The package cache, redirected here by the shellHook so it stays out
+# of ~/.cache.
+.zig-global-cache/

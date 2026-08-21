@@ -58,6 +58,7 @@ the machine.
   - [The manual path](#the-manual-path)
   - [Day to day](#day-to-day)
   - [Dependencies, on the way in](#dependencies-on-the-way-in)
+  - [Which version a template starts on](#which-version-a-template-starts-on)
   - [Why a project shell is instant](#why-a-project-shell-is-instant)
   - [Secrets](#secrets)
   - [A project that isn't yours](#a-project-that-isnt-yours)
@@ -218,6 +219,7 @@ packages/
                                    #   packages output
 templates/                         # `nix flake init -t` dev environments
   generic/ python/ node/ rust/ go/
+  dotnet/ java/ gleam/ zig/
 ```
 
 ## niri (alternative to Plasma)
@@ -4027,7 +4029,7 @@ In the project directory:
 
 ```bash
 dev-init            # generic skeleton
-dev-init python     # or: node, rust, go
+dev-init python     # or: node, rust, go, dotnet, java, gleam, zig
 ```
 
 That copies a template's `flake.nix`, `.envrc` and `.gitignore` in and marks
@@ -4096,11 +4098,18 @@ check working, not a failure.
 | run one command without entering | `nix develop -c pytest` |
 | a second shell (e.g. CI) | `devShells.${system}.ci = ...`, entered with `use flake .#ci` |
 
-Anything the project writes at runtime — a venv, `node_modules`, `GOPATH` —
+Anything the project writes at runtime — a venv, `node_modules`, `GOPATH`,
+the NuGet cache, Maven's repository, Gradle's user home, Zig's package cache —
 stays inside the project directory. The templates set that up and ignore the
-paths in `.gitignore`, because the Nix store is read-only and the alternative
-is a tool failing halfway through an install with a confusing error. What goes
-*into* those directories is the next section.
+paths in `.gitignore`. For the venv the reason is hard: the Nix store is
+read-only, and the alternative is a tool failing halfway through an install
+with a confusing error. For the caches it's a preference, and one with a
+price — nothing is shared between projects, so two Java repos fetch the same
+jar twice. What it buys is that deleting the directory deletes the state, and
+that a machine's `$HOME` doesn't slowly fill with the residue of projects that
+no longer exist. Each of those exports is one line in the `shellHook` with a
+comment saying so; drop it and the tool goes back to its own default. What
+goes *into* those directories is the next section.
 
 ### Dependencies, on the way in
 
@@ -4119,18 +4128,35 @@ be set up:
 | python | `uv sync` for a `uv.lock` or a pyproject with a `[project]` table; otherwise `uv pip install -r requirements.txt`, and `requirements-dev.txt` beside it if it exists | any of those is newer than the stamp, or the venv was rebuilt |
 | go | `go mod download` | `go.mod` or `go.sum` is newer than the stamp |
 | rust | `cargo fetch` | `Cargo.toml` or `Cargo.lock` is newer than the stamp |
+| dotnet | `dotnet restore` | a root-level `.sln`/`.slnx`/`.csproj`/`.fsproj`/`.vbproj`, `Directory.Packages.props`, `Directory.Build.props`, `global.json`, `nuget.config` or `packages.lock.json` is newer than the stamp |
+| java | `mvn dependency:go-offline` for a `pom.xml`, `gradle dependencies` for Gradle build scripts — the project's `mvnw`/`gradlew` in preference to the shell's copy | that build file, or `gradle.properties` or `gradle/libs.versions.toml`, is newer than the stamp |
+| gleam | `gleam deps download` | `gleam.toml` or `manifest.toml` is newer than the stamp |
+| zig | `zig build --fetch` | `build.zig.zon` or `build.zig` is newer than the stamp |
 
-Go and Rust would fetch on demand anyway, at the first `go build` or `cargo
-build`. Doing it here doesn't add a capability, it moves the wait: to a prompt
-that is expecting one, rather than into the middle of the first build or the
-first test run.
+Go, Rust, .NET, Gleam and Zig would all fetch on demand anyway, at the first
+`go build`, `cargo build`, `dotnet build`, `gleam build` or `zig build`. Doing
+it here doesn't add a capability, it moves the wait: to a prompt that is
+expecting one, rather than into the middle of the first build or the first
+test run.
+
+Two of them are narrower than they look, deliberately. `dotnet restore` with
+no argument wants exactly one project or solution file in the directory it's
+run from, so the .NET template only looks at the root — a tree whose projects
+all live under `src/` with no solution above them is left alone, and the first
+`dotnet build` restores it as it always would. `gradle dependencies` is
+Gradle's only built-in task that resolves configurations without building
+anything, and in a multi-project build it resolves the root project's; the
+subprojects are resolved at the first real build. Its report is a few hundred
+lines of dependency tree, so the template sends stdout to `/dev/null` and
+leaves stderr alone, which is why a Gradle failure still says why.
 
 The stamp is an empty `.dev-shell-deps`, written inside the directory the tool
-already owns — `node_modules/`, `.venv/`, `.go/`, `target/`, all of them
-already in the template's `.gitignore`. It is touched only after an install
-that exited zero, and that is what makes any of this affordable in a hook that
-runs at every single prompt: the ordinary entry is a handful of `test`
-builtins and no subprocess at all. Two things follow from where it lives. An
+already owns — `node_modules/`, `.venv/`, `.go/`, `target/`, `.nuget/`,
+`.m2/`, `.gradle-home/`, `build/`, `.zig-global-cache/`, all of them already
+in the template's `.gitignore`. It is touched only after an install that
+exited zero, and that is what makes any of this affordable in a hook that runs
+at every single prompt: the ordinary entry is a handful of `test` builtins and
+no subprocess at all. Two things follow from where it lives. An
 install that failed didn't write one, so the next entry tries again rather
 than recording a half-populated tree as done; and deleting the directory
 deletes the stamp with it, so `rm -rf node_modules` (or the venv rebuild the
@@ -4160,6 +4186,65 @@ reproducible, wrong for something that happens on a `cd`.
 The generic template has none of this — it can't know what installing means
 for a project it knows nothing about — but its `shellHook` carries the same
 shape commented out, for the project whose bootstrap is a `make deps`.
+
+### Which version a template starts on
+
+Every template starts on the newest toolchain nixpkgs actually builds, which
+is frequently *not* the attribute nixpkgs leaves unsuffixed. The bare name is
+a compatibility promise as much as a version, and for the slower-moving
+ecosystems it sits several releases back:
+
+| template | what it asks for | what the bare attribute is |
+|---|---|---|
+| dotnet | `dotnet-sdk_10` | `dotnet-sdk` is 8.0, an LTS nixpkgs has not moved off |
+| java | `jdk25`, `gradle_9` | `jdk` is 21, `gradle` is 8 |
+| zig | `zig`, `zls` | already 0.16; nixpkgs keeps these two in step on purpose |
+| gleam | `gleam`, `beamPackages.erlang`, `beamPackages.rebar3` | already current; that set is OTP 28 |
+| node | `nodejs_26` | `nodejs` is the active LTS |
+| python | `python313` | `python3` is 3.14; this is the one row where the newest isn't the point — what matters is that the *package set* is one Hydra builds, [below](#why-a-project-shell-is-instant), and 3.13 and 3.14 both are |
+
+The go and rust templates aren't in the table because they have nothing to
+spell out: `go`, `cargo` and `rustc` unsuffixed are already the current
+releases, and a pinned or nightly Rust toolchain is the `rust-overlay` job the
+rust template's comment points at rather than an attribute name.
+
+Four of those rows carry a constraint worth knowing before you edit the line.
+
+**Gradle and the JDK have to match.** nixpkgs builds `gradle_8` against JDK 21
+and `gradle_9` against JDK 25, which is upstream Gradle's own compatibility
+table showing through: a Gradle release supports the JVMs that existed when it
+shipped and refuses the ones that didn't. Taking `jdk25` without also taking
+`gradle_9` is a build that won't start. The JDK a project *targets* is a
+separate question, and the right answer to it is a Gradle toolchain in the
+build script rather than a different compiler in the shell.
+
+**Zig and zls have to match.** zls parses the language itself rather than
+asking the compiler, so a zls built against a different release reports
+constructs it doesn't recognise as syntax errors — in a file that compiles
+perfectly well, which is a confusing hour. nixpkgs points the two bare names
+at the same release and says so in a comment beside them; if you pin one, pin
+the other.
+
+**Erlang and rebar3 have to match too.** The Gleam template takes both from
+`beamPackages`, which *is* the package set built against
+`beamPackages.erlang` — so moving up an OTP release means changing the set,
+not the package: `beam29Packages.erlang` together with
+`beam29Packages.rebar3`. Taking one from each stands a rebar3 compiled for one
+release next to another. (The bare `pkgs.erlang` is now a deprecated alias for
+`beamPackages.erlang` and warns on every evaluation, which is the other reason
+the template spells the set out.)
+
+**.NET can't be multi-versioned by listing two SDKs.** A dotnet installation
+is a single directory that expects to be able to install further runtimes
+alongside itself, and in the store it cannot. Two SDKs in `packages` gives you
+two directories and a `dotnet` that knows about one of them. The composition
+has to happen at build time:
+
+```nix
+(with pkgs.dotnetCorePackages; combinePackages [ sdk_10_0 sdk_9_0 ])
+```
+
+The first SDK listed is the one whose `dotnet` ends up on `PATH`.
 
 ### Why a project shell is instant
 

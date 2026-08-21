@@ -1,0 +1,17 @@
+# Built by nix-direnv when you cd in. Holds the GC root for this
+# project's dev shell.
+.direnv/
+
+# nix build output symlink.
+result
+result-*
+
+# Gleam's build directory, which is also where its dependencies are
+# unpacked. manifest.toml is *not* in here — commit that one.
+build/
+
+# Erlang leftovers, from `gleam export erlang-shipment` and from a VM
+# that fell over.
+*.beam
+*.ez
+erl_crash.dump
