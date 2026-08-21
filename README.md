@@ -130,6 +130,13 @@ attribute nixpkgs leaves unsuffixed — `dotnet-sdk` is still 8.0, `jdk` is 21,
 why beside the line: [Which version a template starts
 on](MANUAL.md#which-version-a-template-starts-on).
 
+Every template builds its shell for `x86_64-linux`, `aarch64-linux` and
+`aarch64-darwin`, and `dev-init` is published for the same three, so a project
+started on a desktop still enters its shell on an ARM box or an Apple Silicon
+Mac. `x86_64-darwin` is the omission, and not one a line would fix — nixpkgs
+26.11 dropped Intel Macs: [The systems a template builds
+for](MANUAL.md#the-systems-a-template-builds-for).
+
 On the NixOS hosts it arrives with `modules/nixos/development.nix`, whose
 import is commented out per host — uncomment it on the machines you actually
 develop on. Anywhere else nix is a package like any other and the module's
@@ -152,6 +159,14 @@ curl -L https://nixos.org/nix/install | sh -s -- --daemon
 One or the other, never both: two things each believing they own `/nix` is a
 bad afternoon. Either way nix isn't in the shell you ran that from — open a
 new one.
+
+On macOS that same installer is the way in, and the steps below apply with two
+substitutions: step 4's shell config goes in `~/.zshrc`, and the daemon is
+restarted with `sudo launchctl kickstart -k system/org.nixos.nix-daemon`
+rather than through systemd. The two macOS-only surprises — `/nix` being an
+APFS volume rather than a directory, and a system update quietly dropping
+nix's snippet from `/etc/zshrc` — are in [Nix on
+macOS](MANUAL.md#nix-on-macos).
 
 **2. `/etc/nix/nix.conf`** — the `nix.settings` from `base.nix` and
 `development.nix`, written longhand:

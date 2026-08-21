@@ -204,11 +204,42 @@
       ...
     }@inputs:
     let
+      # The machines. Every host below is x86_64, and `nixosSystem` takes one
+      # system per call, so this stays a plain string.
       system = "x86_64-linux";
-      pkgs = import nixpkgs {
-        inherit system;
-        config.allowUnfree = true;
-      };
+
+      # The systems the outputs that aren't a host — `dev-init`, the
+      # formatter — are built for. `dev-init` is a shell script and would run
+      # anywhere; what this list is really claiming is that `templates/` works
+      # on all three, which is the part worth being careful about. See the
+      # `systems` list in any template for the same list from the other side.
+      #
+      # x86_64-darwin, the Intel Mac, is the deliberate omission, and not one
+      # a longer list would fix: nixpkgs 26.11 — the unstable branch this
+      # flake follows — dropped that platform, so `import nixpkgs { system =
+      # "x86_64-darwin"; }` throws before any package is named. Such a
+      # machine wants a nixpkgs off the 26.05 branch, which is a different
+      # input rather than another line here.
+      devSystems = [
+        "x86_64-linux"
+        "aarch64-linux"
+        "aarch64-darwin"
+      ];
+
+      # `system -> f pkgs` for those outputs. Each `import` is forced only
+      # when something asks for that system's attribute by name, so the two
+      # this machine isn't cost an entry in an attrset and nothing else.
+      forEachDevSystem =
+        f:
+        nixpkgs.lib.genAttrs devSystems (
+          devSystem:
+          f (
+            import nixpkgs {
+              system = devSystem;
+              config.allowUnfree = true;
+            }
+          )
+        );
     in
     {
       nixosConfigurations =
@@ -391,6 +422,12 @@
       # `dotnet-sdk`, `jdk` and `gradle` all still point at older releases,
       # so dotnet, java and their like spell the version out. Each says why
       # in a comment beside the line.
+      #
+      # Every one of them builds its devShell for each of `devSystems` above
+      # rather than for one hard-coded string, so a project started here is a
+      # project that still enters its shell on the ARM boxes and on the Mac.
+      # The list is at the top of each template's `outputs`, one line per
+      # system, and trimming it is as much a decision as extending it.
       templates = {
         default = self.templates.generic;
 
@@ -493,12 +530,19 @@
       # The command normally arrives with modules/nixos/development.nix, in
       # the system profile of whichever hosts have that import uncommented.
       # That is no help on a machine running something else — the CachyOS
-      # install, a work laptop, a container — where there is nix and no
-      # NixOS. Exposing the same derivation as a package makes it reachable
-      # from any of them:
+      # install, a work laptop, an Apple Silicon Mac, a container — where
+      # there is nix and no NixOS. Exposing the same derivation as a package
+      # makes it reachable from any of them:
       #
       #     nix profile install github:joshrandall8478/nixos#dev-init
       #     nix run github:joshrandall8478/nixos#dev-init -- python
+      #
+      # Built for every system in `devSystems` above rather than for the
+      # hosts' x86_64-linux alone, because those two commands ask for
+      # `packages.<the system nix is running on>.dev-init` and nothing else:
+      # a Mac or an ARM box finds no attribute under its own name and is told
+      # the flake has no such package, which reads as "this doesn't work
+      # here" and is really "nobody wrote the line".
       #
       # `profile install` is the one to prefer, and not only because it puts
       # the command on PATH for good. Evaluating any output of this flake
@@ -510,12 +554,19 @@
       # The rest of what development.nix does — the nix.settings, direnv,
       # the registry pin — has no package to install and has to be set up by
       # hand there. See "Nix on a machine that isn't NixOS" in MANUAL.md.
-      packages.${system}.dev-init = pkgs.callPackage ./packages/dev-init.nix { };
+      packages = forEachDevSystem (pkgs: {
+        dev-init = pkgs.callPackage ./packages/dev-init.nix { };
+      });
 
       # Same program as `nixfmt-rfc-style`, under its own name. nixpkgs used
       # to carry two formatters — that one and a `nixfmt-classic` — and the
       # long name distinguished them; classic has since been removed and
       # `nixfmt-rfc-style` is now an alias that warns on every evaluation.
-      formatter.${system} = pkgs.nixfmt;
+      #
+      # Per system for the same reason as the package above: `nix fmt` reads
+      # `formatter.<the system it is running on>`, so a checkout being
+      # formatted on the Mac needs its own entry or nix reports the flake as
+      # having no formatter at all.
+      formatter = forEachDevSystem (pkgs: pkgs.nixfmt);
     };
 }
