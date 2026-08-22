@@ -471,6 +471,68 @@
     '';
   };
 
+  options.local.niri.onScreenKeyboard.enable = lib.mkOption {
+    type = lib.types.bool;
+    default = true;
+    description = ''
+      Install the on-screen keyboard and give it its `Mod+Shift+K` bind.
+
+      This exists for the Steam Controller. `local.gaming.steamInputOnWayland`
+      (modules/nixos/options.nix) gives the pad a real pointer in this session
+      through extest, and extest translates XTEST's keyboard call as well as
+      its pointer ones — so the pad can already type through a Steam layout
+      that binds keys to buttons. What has no answer here is a keyboard you
+      point at. Keys from extest arrive as a keyboard plugged into the
+      machine, so they go to whatever window the *compositor* has focused, and
+      Steam's own on-screen keyboard is itself a window in this session:
+      whether it works at all depends on that window never taking focus when
+      the pointer lands on it, which this session cannot promise —
+      `focus-follows-mouse` is on, and a window that accepts focus gets it.
+
+      wvkbd is not in that position by construction. It asks the compositor
+      for no keyboard interactivity at all, so it can never take focus off the
+      window underneath, and it types through `zwp_virtual_keyboard_v1` — a
+      protocol niri implements — which delivers to the focused window by
+      definition. It sits on the overlay layer, above fullscreen windows, so
+      it works over Big Picture and over a game.
+
+      The key is a niri bind and niri binds read real key events, so the pad
+      opens it the same way it types: bind a controller button to
+      `Super+Shift+K` in Steam's desktop layout. All three keys are in
+      extest's table, which is what limits which chord this can be — see
+      home/joshr/niri/osk.nix.
+
+      Off, none of it is installed and the bind is not written; nothing else
+      in the session refers to it. A machine that is never driven from the
+      couch loses nothing by turning it off, and keeps `Mod+Shift+K` free.
+    '';
+  };
+
+  options.local.niri.onScreenKeyboard.height = lib.mkOption {
+    type = lib.types.ints.positive;
+    default = 320;
+    description = ''
+      How tall the on-screen keyboard is, in pixels.
+
+      wvkbd takes a height per orientation and picks between them by comparing
+      the output's width and height; this sets both, because every display
+      here is landscape and the portrait number would only ever be reached by
+      a rotated one.
+
+      The number is pixels rather than a fraction of the screen, so it is
+      worth a thought on a host whose display is much shorter than the desk's
+      1440: 320 is about a fifth of the screen there and nearly a third of a
+      1080p laptop panel. Keys scale with it, and typing with a trackpad-
+      driven cursor wants them large — the point of this keyboard is that it
+      is aimed at with a pointer that has no fine control.
+
+      wvkbd asks the compositor to reserve this much space at the bottom of
+      the screen, so tiled windows shrink to make room while it is up and get
+      it back when it goes away. Fullscreen windows ignore that reservation,
+      which is why the keyboard overlaps a game rather than resizing it.
+    '';
+  };
+
   # OpenRGB's options are not here. `local.openrgb.autostart`, `.profile` and
   # `.applyOnResume` are declared on the NixOS side (modules/nixos/options.nix)
   # and read from this side through `osConfig`, because the session isn't the

@@ -1472,6 +1472,35 @@ let
     LOCK_WARN=${lib.removePrefix "#" t.warn}
   '';
 
+  # The on-screen keyboard's palette, in the same shape and for the same
+  # reason: wvkbd takes its colours as command-line flags, so what it can be
+  # given is a shell fragment the launcher sources (see ./osk.nix).
+  #
+  # The names are the keyboard's rather than a stylesheet's. `bg` is the panel
+  # the keys sit on, `fg` is the key faces drawn on it, and the `-sp` half of
+  # each pair is the special keys — modifiers, Return, the layout switcher.
+  # Those take the border colour, which is what separates them from the letters
+  # in every palette here.
+  #
+  # A held key is `accent` with `bg` written on it, which is the pairing
+  # themes.nix already uses everywhere an accent serves as a background:
+  # waybar's active workspace, wofi's selected row, kitty's selection. The
+  # `--text-press` flags are what make it safe to use the light accents — left
+  # unset, wvkbd draws a held key's label in its compiled-in white, and the
+  # light theme in themes.nix would put that on a near-white key.
+  renderWvkbdEnv = name: t: ''
+    # Generated from home/joshr/niri/themes.nix — theme "${name}".
+    OSK_BG=${lib.removePrefix "#" t.bg}
+    OSK_FG=${lib.removePrefix "#" t.bgAlt}
+    OSK_FG_SP=${lib.removePrefix "#" t.border}
+    OSK_TEXT=${lib.removePrefix "#" t.fg}
+    OSK_TEXT_SP=${lib.removePrefix "#" t.fg}
+    OSK_PRESS=${lib.removePrefix "#" t.accent}
+    OSK_TEXT_PRESS=${lib.removePrefix "#" t.bg}
+    OSK_PRESS_SP=${lib.removePrefix "#" t.accentDim}
+    OSK_TEXT_PRESS_SP=${lib.removePrefix "#" t.fg}
+  '';
+
   # The lock screen's password field, as a picture of one.
   #
   # Hyprlock cannot change a colour while it is up. `reload_cmd` re-reads a
@@ -1584,6 +1613,7 @@ let
         cp ${pkgs.writeText "dunstrc" (renderDunstrc name t)}          "$out/dunstrc"
         cp ${pkgs.writeText "swayosd.css" (renderSwayosdCss name t)}   "$out/swayosd.css"
         cp ${pkgs.writeText "swaylock.env" (renderSwaylockEnv name t)} "$out/swaylock.env"
+        cp ${pkgs.writeText "wvkbd.env" (renderWvkbdEnv name t)}       "$out/wvkbd.env"
         cp ${pkgs.writeText "kdeglobals" (renderKdeglobals name t)}     "$out/kdeglobals"
         cp ${pkgs.writeText "kitty.conf" (renderKitty name t)}          "$out/kitty.conf"
         cp ${pkgs.writeText "userChrome.css" (renderFirefoxUserChrome name t)}   "$out/firefox-userChrome.css"
