@@ -38,6 +38,7 @@
     ./lock.nix
     ./clipboard.nix
     ./emoji.nix
+    ./osk.nix
     # No ./browser.nix or ./mime.nix any more. Both set `xdg.mimeApps`, which
     # owns ~/.config/mimeapps.list and made every settings panel unable to
     # save; the associations are now a system baseline in

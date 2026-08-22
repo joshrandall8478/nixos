@@ -1,4 +1,4 @@
-{ config, lib, pkgs, osConfig ? { }, niriTheming, niriScripts, niriClipboard, niriEmoji, niriGamemode, ... }:
+{ config, lib, pkgs, osConfig ? { }, niriTheming, niriScripts, niriClipboard, niriEmoji, niriGamemode, niriOsk, ... }:
 
 # niri's own config. There is no home-manager module for niri, so this is
 # written out as a KDL file.
@@ -390,6 +390,32 @@ let
         wait-for-frame-completion-before-queueing
     }
   '';
+
+  # The on-screen keyboard's key, when `local.niri.onScreenKeyboard.enable`
+  # asks for it. See ./osk.nix for what it opens and why it exists at all.
+  #
+  # `Mod+Shift+K` is chosen from a short list, not for the mnemonic alone. The
+  # controller is what this key is for, and a controller presses it through
+  # extest — whose virtual device only carries the keys Steam's Big Picture can
+  # bind — so the chord has to be spellable in Super, Shift, Ctrl, Alt and a
+  # letter. `Mod+K` and `Mod+Ctrl+K` are focus and move; this one was free.
+  #
+  # Interpolated at column zero like the screenshot comment above, so the
+  # indentation is put back here rather than left to the template.
+  oskBind = lib.optionalString config.local.niri.onScreenKeyboard.enable (
+    lib.concatMapStringsSep "\n" (line: "        ${line}") (lib.splitString "\n" oskBindBody)
+  );
+
+  oskBindBody = ''
+    // --- on-screen keyboard ----------------------------------------
+    // The keyboard for the times there isn't one: a search field, a login
+    // box, a server address, typed from the couch with the Steam
+    // Controller's pointer doing the clicking. Binding a pad button to this
+    // same chord in Steam's desktop layout is what lets the pad open it —
+    // ./osk.nix has why that works and why the chord is this one.
+    //
+    // The same key puts it away; `osk-toggle` is both halves.
+    Mod+Shift+K hotkey-overlay-title="On-screen keyboard (toggle)" { spawn "${bin niriOsk.oskToggle}"; }'';
 in
 {
   xdg.configFile."niri/config.kdl".text = ''
@@ -655,6 +681,7 @@ ${debugBlock}
         // binding, `expel-window-from-column`, which moved down to
         // Mod+Shift+Period among the sizing binds. See emoji.nix.
         Mod+Period hotkey-overlay-title="Emoji" { spawn-sh "${emojiPicker}"; }
+${oskBind}
 
         // --- session ---------------------------------------------------
         // Lock is Mod+L, matching the Windows/KDE reflex. That costs the
