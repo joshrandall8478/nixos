@@ -22,7 +22,7 @@
     ./spicetify.nix
     ./firefox.nix
     ./browser.nix
-    ./wallhaven.nix
+    #./wallhaven.nix
     ./emu-hackathon.nix
     ./image-editing.nix
   ];
