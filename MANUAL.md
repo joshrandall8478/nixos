@@ -69,6 +69,7 @@ the machine.
 - [Gaming performance](#gaming-performance)
   - [`gaming-doctor`](#gaming-doctor)
   - [The controller, and the second cursor](#the-controller-and-the-second-cursor)
+  - [Typing with the pad: the on-screen keyboard](#typing-with-the-pad-the-on-screen-keyboard)
   - [The desktop is also drawing](#the-desktop-is-also-drawing)
   - [VRR, and the judder that isn't the game](#vrr-and-the-judder-that-isnt-the-game)
   - [The shader cache, and the sawtooth](#the-shader-cache-and-the-sawtooth)
@@ -205,6 +206,7 @@ home/joshr/
     gamemode.nix                   #   the Mod+G / gamemoderun performance mode
     clipboard.nix                  #   clipboard history
     emoji.nix                      #   the Mod+. emoji picker
+    osk.nix                        #   the Mod+Shift+K on-screen keyboard
     vscode.nix lock.nix            #   editor theming, idle handling
   plasma.nix                       # KDE Plasma settings/panels/shortcuts (plasma-manager)
   files/                           # DarkObsidianII.colors
@@ -1592,6 +1594,7 @@ restart Spotify so the new launcher supplies the mount.
 | `Mod+Ctrl+E` | ranger, in a terminal |
 | `Mod+Ctrl+V` | clipboard history |
 | `Mod+.` | emoji picker |
+| `Mod+Shift+K` | on-screen keyboard — a controller's pointer can click it |
 | `Mod+Q` / `Mod+O` | close window, overview |
 | `Mod+H/J/K` | focus (arrows also work; `Mod+L` is lock, so use `Mod+Right`) |
 | `Mod+1..5` | named workspaces |
@@ -4925,6 +4928,85 @@ There is deliberately no option here for forcing that by taking the hidraw node
 away from Steam in udev. It would work, and it would cost the pad's entire
 purpose to fix its pointer, which is a decision to make in Steam's settings
 where it can be undone in a second rather than in a rebuild.
+
+All of that is about the *pointer*. Typing is a separate problem with a
+separate answer, and it is the next section.
+
+### Typing with the pad: the on-screen keyboard
+
+The section above gets the cursor moving. This is the other half of the same
+evening: putting text into a box — a launcher's search field, a login form, a
+server address — without getting up for the keyboard.
+
+Two things are true at once here, and running them together is what makes this
+look broken. extest replaces XTEST's *keyboard* entry point as well as its
+pointer ones — `XTestFakeKeyEvent` emits a real key on the same uinput device
+the cursor comes from — so a Steam layout that binds pad buttons to keys does
+type in this session, and Steam's own on-screen keyboard does produce
+keystrokes. What extest cannot decide is **where they land**. A uinput device
+is a keyboard plugged into the machine: what it emits goes to whichever window
+the *compositor* has focused, and Steam's keyboard is itself a window in that
+session. Typing on it works only for as long as that window never takes focus
+when the pointer arrives on it — which this session cannot promise, because
+`focus-follows-mouse` is on (`home/joshr/niri/niri.nix`) and a window that
+accepts focus is given it. From there the letters go into Steam rather than
+into the field you were filling in.
+
+`Mod+Shift+K` opens one that cannot end up in that position. The key runs
+`osk-toggle`, which is both halves of it — the keyboard is up or it is gone —
+and what it puts on screen is [wvkbd](https://github.com/jjsullivan5196/wvkbd).
+
+Three properties of it are the whole answer, and all three are structural
+rather than configured. It is a layer-shell surface that asks the compositor
+for *no keyboard interactivity at all*, so it can never take focus off the
+window underneath it, whatever the pointer does. It types through
+`zwp_virtual_keyboard_v1` rather than XTEST — a protocol niri implements —
+which delivers to the focused window by definition. And it draws on the
+overlay layer, which is above fullscreen windows, so it is usable over Big
+Picture and over a game.
+
+**Opening it from the pad.** The key is an ordinary niri bind, and niri binds
+read real key events, so a controller opens the keyboard the same way it types
+into it: bind a pad button to `Super+Shift+K` in Steam's desktop layout, and
+XTEST goes through extest into the same keyboard the bind is watching. That is
+also what fixes which chord this can be — extest's virtual device only carries
+the keys Big Picture can bind (`KEYS` in its `steam_keys.rs`), so a chord
+using a key outside that set would be one the pad could not press. Super,
+Shift and K are all in it.
+
+**On screen.** It is 320px tall by default (`local.niri.onScreenKeyboard.height`)
+and asks for that much space at the bottom of the screen, so tiled windows
+shrink to make room while it is up and get it back when it goes away.
+Fullscreen windows ignore the reservation, which is why it overlaps a game
+instead of resizing it. The layout switcher in the bottom-left cycles the
+layers this session asks for — the wide landscape one, its symbols half, emoji
+and a navigation pad.
+
+**It is started and killed rather than shown and hidden**, which is worth
+knowing because it is not what wvkbd's own documentation suggests. wvkbd takes
+its palette as command-line flags and cannot be recoloured while it is up, so
+a resident keyboard would be the one thing on screen still wearing the theme
+it was launched with. Opening it fresh each time costs a few milliseconds and
+means it is always in the current palette.
+
+Where that palette comes from depends on the shell, and `osk-toggle` takes
+whichever is there. Under the waybar stack it is `wvkbd.env` in the active
+theme directory, rendered by `theming.nix` alongside every other program's
+colours (see [Theme switching](#theme-switching)). Under noctalia it is
+`noctalia-resolved`, the same manifest the SDDM and Limine syncs read — which
+is the better of the two sources, because it describes a wallpaper-derived or
+community palette that nothing built into this generation could have known
+about. With neither present the default theme's colours are baked into the
+launcher itself.
+
+**What it does not cover.** The lock screen: a session lock draws above every
+layer-shell surface, which is the point of it, so nothing on-screen can type a
+password in — that one is still the keyboard's job. And it is a keyboard, not a
+gamepad: the pad has to be able to move a pointer for this to be reachable at
+all, which is the section above.
+
+`local.niri.onScreenKeyboard.enable = false;` removes the command and the bind
+together, for a machine that is never driven from the couch.
 
 ### The desktop is also drawing
 

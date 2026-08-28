@@ -317,6 +317,7 @@ walks the whole thing from a live ISO.
   [gaming performance](MANUAL.md#gaming-performance) ·
   [`gamescope-run`](MANUAL.md#nested-gamescope-and-gamescope-run) ·
   [the Steam controller](MANUAL.md#the-controller-and-the-second-cursor) ·
+  [typing with the pad](MANUAL.md#typing-with-the-pad-the-on-screen-keyboard) ·
   [the kernel](MANUAL.md#the-kernel) ·
   [development environments](MANUAL.md#development-environments) ·
   [nix on other distros](MANUAL.md#nix-on-a-machine-that-isnt-nixos) ·
