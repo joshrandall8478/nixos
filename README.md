@@ -291,6 +291,7 @@ walks the whole thing from a live ISO.
   [the bar](MANUAL.md#the-bar) ·
   [the OSD](MANUAL.md#the-on-screen-display) ·
   [theme switching](MANUAL.md#theme-switching) ·
+  [light/dark](MANUAL.md#light-dark-and-matching-the-system) ·
   [keys](MANUAL.md#keys) ·
   [clipboard](MANUAL.md#clipboard-history) ·
   [emoji](MANUAL.md#emoji-picker) ·

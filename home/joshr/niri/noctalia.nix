@@ -1199,6 +1199,12 @@ let
     # finished palette that is already light or dark — gruvbox-light is the
     # light one — so both variants of each generated palette hold the same
     # colours and this only picks which of two identical halves gets read.
+    #
+    # The session's actual light/dark switch is `theme-mode`, which moves
+    # between palettes rather than between these two slots: every theme names
+    # a `counterpart` in the other mode and switching modes applies it. That
+    # arrives here as an ordinary `color-scheme-set custom <name>`, which is
+    # why this line can stay a constant. See ./noctalia-palettes.nix.
     theme = {
       mode = "dark";
       source = "custom";

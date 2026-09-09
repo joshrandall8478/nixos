@@ -580,7 +580,7 @@ let
         hide_duplicate_count = false
         show_indicators = yes
         enable_recursive_icon_lookup = true
-        icon_theme = "Papirus-Dark"
+        icon_theme = "${iconTheme t}"
         icon_position = left
         min_icon_size = 24
         max_icon_size = 48
@@ -692,19 +692,26 @@ let
     hex: a:
     "rgba(${toString (channel hex 0)}, ${toString (channel hex 2)}, ${toString (channel hex 4)}, ${a})";
 
-  # BT.601 luma of a "#rrggbb", 0–255.
+  # Is this palette light or dark? themes.nix derives it from the luma of
+  # `bg` and attaches it to every palette, so this is a field read rather
+  # than the copy of that calculation it used to be.
   #
-  # Only used to answer one question: is this palette light or dark? Firefox
-  # draws scrollbars, checkboxes and dropdown arrows from CSS `color-scheme`
-  # rather than from any colour we can set, so getting that backwards leaves
-  # those widgets invisible against the themed chrome. Of the palettes here
-  # only mono-light, gruvbox-light, rose-pine-dawn and sandstone come out
-  # light; the threshold is nowhere near any of them, the darkest light one
-  # being gruvbox-light at 239 and the lightest dark one catppuccin-frappé
-  # at 53.
-  luma = hex: (299 * (channel hex 0) + 587 * (channel hex 2) + 114 * (channel hex 4)) / 1000;
+  # Two renderers need it. Firefox draws scrollbars, checkboxes and dropdown
+  # arrows from CSS `color-scheme` rather than from any colour we can set, so
+  # getting it backwards leaves those widgets invisible against the themed
+  # chrome; and VS Code's `uiTheme` decides which of its two base themes the
+  # generated one extends.
+  colorScheme = t: t.mode;
 
-  colorScheme = t: if luma t.bg > 127 then "light" else "dark";
+  # The icon set that goes with it. Papirus ships three trees and
+  # `pkgs.papirus-icon-theme` installs all of them, so this costs nothing but
+  # the name — and a light palette wearing dark folder icons is the same
+  # mistake as a light palette wearing dark scrollbars, just louder.
+  #
+  # This is the build-time half. The runtime half is `theme-mode` writing
+  # org.gnome.desktop.interface icon-theme, which is what GTK4 and the portal
+  # read; see the `appearanceIpc` note in ./scripts.nix.
+  iconTheme = t: if t.mode == "light" then "Papirus-Light" else "Papirus-Dark";
 
   # kdeglobals, so KDE apps — Dolphin in particular — follow the palette.
   #
@@ -720,7 +727,7 @@ let
     TerminalApplication=${pkgs.kitty}/bin/kitty
 
     [Icons]
-    Theme=Papirus-Dark
+    Theme=${iconTheme t}
 
     [KDE]
     widgetStyle=Breeze

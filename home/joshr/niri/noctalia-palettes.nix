@@ -26,8 +26,8 @@
 # The `mOn*` halves have no equivalent here, because this config never wrote
 # them down: it assumed `bg` was the text on top of `accent`, which is what
 # kitty's `selection_foreground` and waybar's active workspace both do. That
-# assumption holds on the two dozen dark themes and inverts on the light ones
-# (gruvbox-light, mono-light, rose-pine-dawn), where `bg` is the pale colour.
+# assumption holds on the twenty-nine dark themes and inverts on the
+# twenty-two light ones, where `bg` is the pale colour.
 # So rather than hard-coding it, `textOn` below picks whichever of the theme's
 # own two text colours is further from the surface in question. On a dark
 # theme that returns `bg` — the existing behaviour, unchanged — and on a light
@@ -44,9 +44,20 @@
 # palette that is already either light or dark — "gruvbox-light" is the light
 # one — and picking it is the whole gesture. Writing the same variant into
 # both slots keeps that: whatever mode noctalia is in, the theme you chose is
-# the theme you get, and `theme-mode-toggle` becomes a no-op rather than a
-# second, hidden axis that could put a light theme's colours into dark mode's
-# contrast assumptions.
+# the theme you get, rather than a second, hidden axis that could put a light
+# theme's colours into dark mode's contrast assumptions.
+#
+# The cost is that noctalia's own dark/light switch does nothing, and that is
+# still the right trade now that there *is* a light/dark switch here. It just
+# is not that one. `theme-mode` (../niri/scripts.nix) switches modes by
+# switching palettes — to the `counterpart` the current one names in
+# themes.nix — so under noctalia it resolves to an ordinary
+# `color-scheme-set custom <name>` and nothing about this file has to change.
+#
+# Filling the two slots with a family's two halves instead was the obvious
+# alternative and does not work: `theme-apply` would then have to set
+# `theme.mode` as well as the palette, or picking `gruvbox-light` by name
+# while the shell sat in dark mode would silently hand back `gruvbox`.
 let
   themeSet = import ./themes.nix { inherit lib; };
   inherit (themeSet) themes;
@@ -98,9 +109,10 @@ let
   # The real sRGB transfer curve is a linear toe below 0.03928 and
   # ((v + 0.055) / 1.055) ^ 2.4 above it, and Nix has no float `pow` to write
   # that with. Squaring is the usual stand-in and it is accurate enough for
-  # the one question asked here: across all 29 themes it picks the same winner
-  # as the exact curve in 115 of 116 pairs, and the single case it calls
-  # differently (gruvbox-light's `warn`) still lands above 3:1.
+  # the one question asked here: across all 51 themes it picks the same winner
+  # as the exact curve in 202 of 204 pairs, and both cases it calls
+  # differently (gruvbox-light's `warn`, matcha's `accentDim`) still land
+  # above 3:1 measured against the exact curve.
   luminance =
     hex:
     let

@@ -127,8 +127,23 @@
     };
   };
 
-  # Dark preference for apps that honour it (GTK4/libadwaita, Electron).
-  dconf.settings."org/gnome/desktop/interface".color-scheme = "prefer-dark";
+  # The light/dark preference for apps that honour it (GTK4/libadwaita,
+  # Electron, Firefox, Qt6) is deliberately *not* declared here any more.
+  #
+  # It used to be pinned to "prefer-dark", which is right for most of the
+  # palettes and wrong for all twenty-two light ones. It is now runtime
+  # state, owned by `theme-mode` in ./scripts.nix: an explicit dark or light
+  # preference writes the key, and `theme-mode auto` reads it instead — that
+  # is what "match the system" means, and a declared value would either
+  # fight it or make it meaningless.
+  #
+  # `gtk.theme.name` and `gtk.iconTheme.name` above stay declared, because
+  # they are two things at once. The names in ~/.config/gtk-3.0/settings.ini
+  # are the build-time default a GTK3 app reads at startup; the *dconf* keys
+  # home-manager writes from the same values are what GTK4 and the portal
+  # read, and `theme-mode` overwrites those to follow the palette. See the
+  # niri-theme-auto unit at the bottom of ./scripts.nix for how they get put
+  # back after a rebuild resets them.
 
   # Qt apps take their palette from KDE, not from GTK.
   #

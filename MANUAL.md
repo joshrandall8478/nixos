@@ -16,6 +16,7 @@ the machine.
   - [The bar](#the-bar)
   - [The on-screen display](#the-on-screen-display)
   - [Theme switching](#theme-switching)
+  - [Light, dark, and matching the system](#light-dark-and-matching-the-system)
   - [Theme sync under noctalia](#theme-sync-under-noctalia)
   - [Keys](#keys)
   - [Clipboard history](#clipboard-history)
@@ -598,7 +599,7 @@ cluster means the right-hand side. The launcher is deliberately excluded: it's
 a search box rather than a menu belonging to a widget, it's opened from the
 keyboard as often as the bar, and centred is where a search box belongs.
 
-**`themes.nix` stays the source of the 29 palettes**, under both shells. Under
+**`themes.nix` stays the source of the 51 palettes**, under both shells. Under
 waybar, `theming.nix` renders each into the seven config formats those daemons
 read; under noctalia, `noctalia-palettes.nix` renders the same palettes into
 noctalia's own colour-scheme format and drops one JSON file per theme into
@@ -616,7 +617,7 @@ written up.
 
 Two mechanisms share the rest of that job, and the split is not arbitrary.
 
-`theming.nix` renders all 29 palettes into the config formats this repo
+`theming.nix` renders all 51 palettes into the config formats this repo
 already had to speak — niri's KDL, kitty's include, `kdeglobals` for Dolphin
 and the KDE file dialogs, VS Code, firefox, wofi — and `theme-apply` moves the
 symlink they all point at. That machinery predates noctalia and is what runs
@@ -1230,35 +1231,87 @@ anything to say about.
 
 ### Theme switching
 
-29 palettes ship, and `nord` is the default.
+51 palettes ship — 29 dark and 22 light — and `nord` is the default.
 
-`joshrandall-net` is the house palette — dark neutral grey with a pastel
-green. Greens: `matrix` (bright phosphor), `forest`, `mint`. Monochrome:
-`mono` (white on black), `mono-light` (black on white). Reds: `blackred`,
-`crimson`. Then `catppuccin-mocha`, `catppuccin-macchiato`,
-`catppuccin-frappe`, `rose-pine`, `rose-pine-moon`, `nord`, `dracula`,
-`tokyo-night`, `everforest`, `kanagawa`, `solarized`, and the four Gruvbox
-contrasts — `gruvbox` (medium), `gruvbox-hard`, `gruvbox-soft` and
-`gruvbox-light`, all transcribed from morhetz/gruvbox's own palette.
+They come in **families**, and every family has both halves, because the
+light/dark toggle described in the next section has to have somewhere to go
+from wherever you are. So each palette names a `counterpart` in the other
+mode, and switching modes means applying it.
 
-Four are originals rather than transcriptions: `synthwave` (neon magenta on
-midnight violet), `ember` (amber on a cold neutral charcoal, where Gruvbox's
-orange sits on a warm one), `abyss` (cyan on deep-water navy) and `sakura`
-(pastel rose on ink plum).
+| family | dark | light |
+|---|---|---|
+| house | `joshrandall-net` | `joshrandall-net-light` |
+| greens | `matrix`, `forest`, `mint`, `matcha` | `matrix-light`, `forest-light`, `mint-light`, `matcha-light` |
+| monochrome | `mono` | `mono-light` |
+| reds | `blackred`, `crimson` | `blackred-light`, `crimson-light` |
+| catppuccin | `catppuccin-mocha`, `-macchiato`, `-frappe` | `catppuccin-latte` |
+| rosé pine | `rose-pine`, `rose-pine-moon` | `rose-pine-dawn` |
+| nord | `nord` | `nord-light` |
+| gruvbox | `gruvbox`, `gruvbox-hard`, `gruvbox-soft` | `gruvbox-light` |
+| dracula | `dracula` | `alucard` |
+| tokyo night | `tokyo-night`, `tokyo-night-storm` | `tokyo-night-day` |
+| everforest | `everforest` | `everforest-light` |
+| kanagawa | `kanagawa`, `kanagawa-dragon` | `kanagawa-lotus` |
+| solarized | `solarized` | `solarized-light` |
+| synthwave | `synthwave` | `synthwave-light` |
+| ember | `ember` | `ember-light` |
+| abyss | `abyss` | `abyss-light` |
+| sakura | `sakura` | `sakura-light` |
+| sandstone | `sandstone-dark` | `sandstone` |
 
-Three light options besides `mono-light`: `rose-pine-dawn` is the cool one,
-`gruvbox-light` the yellow one, and `sandstone` — warm paper and sienna —
-sits between them.
+Where a family has more than one dark contrast the mapping is deliberately
+asymmetric: `gruvbox-hard` and `gruvbox-soft` both toggle to `gruvbox-light`,
+and it toggles back to plain `gruvbox`. A toggle has to pick one answer, and
+the medium contrast is the family's canonical dark — so toggling twice from
+`gruvbox-hard` lands on `gruvbox`, which is the least surprising of the
+available wrong answers.
 
-`Mod+Ctrl+T` opens a picker, which at 29 palettes is the useful way in, and
+Most are transcriptions, quirks and all. Six families are originals:
+`synthwave` (neon magenta on midnight violet), `ember` (amber on a cold
+neutral charcoal, where Gruvbox's orange sits on a warm one), `abyss` (cyan on
+deep-water navy), `sakura` (pastel rose on ink plum), `matcha` (a *warm*
+yellow-green, which is what separates it from the three cool greens beside it)
+and `sandstone` (warm paper and sienna, the one family that was born light and
+grew a dark half).
+
+**Tokyo Night is the one that changed.** It used to be almost
+indistinguishable from `kanagawa` on screen, and not because either was
+transcribed wrong — both were faithful, and both came out as "an indigo-blue
+accent on a very dark desaturated violet". Tokyo Night's `blue` #7aa2f7 and
+Kanagawa's `crystalBlue` #7e9cd8 are four degrees of hue apart, and #1a1b26
+against #1f1f28 is a difference you cannot see on a bar. Only the ten roles
+reach the chrome, so two palettes differing mainly in their *terminal* colours
+arrived as one palette.
+
+Tokyo Night now takes its own `cyan` #7dcfff for the accent and `blue0`
+#3d59a1 for the border — a saturated indigo, where Kanagawa's #435275 is a
+slate grey. Kanagawa keeps the indigo accent and its warm cream text. Side by
+side they now read as a cool theme and a warm one. Cyan rather than Tokyo
+Night's magenta because five palettes here already wear a lavender accent and
+only `abyss` wears a cyan, and abyss's is a saturated teal on near-black teal.
+Its sixteen terminal colours are upstream's too, brights included, where they
+used to repeat the normals.
+
+`Mod+Ctrl+T` opens the picker. It lists the palettes in the mode you are in,
+each with its description beside its id — with fifty-one of them, a column of
+bare names is a list of things you have to already know — and its last row
+opens the whole set. Picking a palette from the other side is allowed and
+moves the preference with it: an explicit pick is an explicit pick.
 `Mod+Ctrl+W` does the same for wallpapers.
 
-The `Mod+Shift` halves of both pairs used to jump to a *random* theme and a
-random wallpaper. They're gone. Random is a fine thing to have on a keyboard
-exactly once and a bad thing to have next to the pickers — `Mod+Shift+W` is
-one slip from `Mod+Ctrl+W`, and the slip silently replaced whatever you'd
-chosen. `theme-random`, `theme-cycle` and `wallpaper-random` are all still on
-PATH for when that is genuinely what you want.
+The `Mod+Shift` half of the wallpaper pair used to jump to a *random*
+wallpaper and is gone. Random is a fine thing to have on a keyboard exactly
+once and a bad thing to have next to a picker — `Mod+Shift+W` is one slip from
+`Mod+Ctrl+W`, and the slip silently replaced whatever you had chosen.
+`theme-random`, `theme-cycle` and `wallpaper-random` are all still on PATH for
+when that is genuinely what you want. `Mod+Shift+T` is now the light/dark
+toggle, which is the one place a `Mod+Shift` neighbour of a picker is safe:
+two states, and pressing it twice puts you back exactly where you were.
+
+Both `theme-cycle` and `theme-random` stay inside the current mode. A picker
+that mixes the two makes the preference meaningless, and a random jump across
+the divide is worse — the one thing you can be sure of about the room you are
+in is that it has not changed since the last keypress.
 
 The mechanism is worth knowing, because it's what keeps this declarative.
 home-manager owns `~/.config/...` as read-only symlinks into the store, so a
@@ -1298,7 +1351,8 @@ surface has an `mOnX` that is the text drawn on it. Ten map straight across.
 The `mOn*` halves had no equivalent, because this config never wrote them
 down: it assumed `bg` was the text on top of `accent`, which is what kitty's
 `selection_foreground` and waybar's active workspace both do. That holds on
-the two dozen dark themes and inverts on the light ones, so instead of
+the twenty-nine dark themes and inverts on the twenty-two light ones, so
+instead of
 hard-coding it `noctalia-palettes.nix` picks whichever of the theme's own two
 text colours has the better WCAG contrast with the surface in question. On a
 dark theme that returns `bg` — the existing behaviour — and on `gruvbox-light`
@@ -1339,10 +1393,15 @@ can't change at runtime — never has to. Restart the editor to see it.
 and `userContent.css` are symlinks into the active theme, read once at
 startup. See "The browser" below.
 
-Adding a theme is one attrset in `themes.nix` — the niri fragment, both
-stylesheets, the dunstrc, the OSD's stylesheet, the swaylock palette, the SDDM
-config, Dolphin's kdeglobals, VS Code's extension and Firefox's two chrome
-stylesheets are all generated from its ten colour roles.
+Adding a theme is one attrset in `themes.nix`, plus its counterpart in the
+other mode so the light/dark toggle has somewhere to go — the niri fragment,
+both stylesheets, the dunstrc, the OSD's stylesheet, the swaylock palette, the
+SDDM config, Dolphin's kdeglobals, VS Code's extension and Firefox's two
+chrome stylesheets are all generated from its ten colour roles. Whether a
+palette is light or dark is *derived* from the luma of its background rather
+than declared, so it cannot go stale against the colours beside it; two
+renderers read it, for Firefox's CSS `color-scheme` and for the Papirus
+variant KDE and dunst are pointed at.
 
 The OSD's sheet is the one that overrides rather than replaces: swayosd loads
 its own at GTK's APPLICATION priority and ours at USER priority, which is
@@ -1357,11 +1416,22 @@ kitty is the exception, because a terminal needs sixteen ANSI colours and ten
 semantic roles don't contain them — there's no blue, magenta or cyan in a
 palette built for a bar and a focus ring. So each theme also carries an `ansi`
 block. Themes with a published terminal palette (Catppuccin, Nord, Gruvbox,
-Dracula, Tokyo Night, Rosé Pine, Everforest, Kanagawa, Solarized) use it
-verbatim, quirks included — Rosé Pine maps "green" to a teal, Solarized's
-bright slots are greys rather than brighter hues. The rest are hand-picked.
-Omitting `ansi` is allowed and falls back to a derivation from the ten roles,
-but it's flat: blue, magenta and cyan all collapse onto the accent.
+Dracula and Alucard, Tokyo Night, Rosé Pine, Everforest, Kanagawa, Solarized)
+use it verbatim, quirks included — Rosé Pine maps "green" to a teal,
+Solarized's bright slots are greys rather than brighter hues, and Kanagawa
+Lotus is the one light palette here whose brights run *lighter* than its
+normals rather than darker. The rest are hand-picked. Omitting `ansi` is
+allowed and falls back to a derivation from the ten roles, but it's flat:
+blue, magenta and cyan all collapse onto the accent.
+
+On the light ones the hand-picked sets invert the usual rule: the bright slots
+go *darker* than the normals, because on paper emphasis is a step towards the
+ink rather than away from it. Two of the transcriptions needed a role moved
+for the same reason — Everforest Light's green and yellow and Catppuccin
+Latte's yellow are display colours, chosen to sit *on* the page rather than to
+have the page written on top of them, and at their published values the active
+workspace came out at 2.3–2.7:1. Both keep their published values in the
+terminal slots, where nothing is drawn over them.
 
 One trap worth knowing if you ever edit the greeter's clock: SDDM reads a
 theme's config through `QSettings(path, QSettings::IniFormat)`, and QSettings'
@@ -1398,6 +1468,84 @@ pick a theme deciding what the machine looks like at boot. Naming one owner
 is the honest version. Pointing it at an account that never opens a niri
 session isn't an error either: the sync services find no state file and leave
 the greeter and boot menu on the default palette.
+
+### Light, dark, and matching the system
+
+The session has a light/dark **preference**, held in
+`~/.local/state/niri-theme/mode`, with three values:
+
+```
+theme-mode dark          pick one and stay there
+theme-mode light
+theme-mode auto          follow the system's own preference
+theme-mode toggle        the other one of dark/light; leaves auto
+theme-mode status        the preference, then what it resolves to
+```
+
+`Mod+Shift+T` is `theme-mode toggle`, and all three states are rows at the top
+of the `Mod+Ctrl+T` picker, marked with a filled bullet for the one you are
+in. They are radio buttons rather than a toggle there on purpose: "match the
+system" is a third state and not a variant of the other two, and in `auto` the
+palette on screen tells you what the system said while nothing tells you it
+was the system that said it.
+
+**Switching modes switches palettes.** There is no second colour axis here —
+every palette in `themes.nix` is finished and is already light or dark — so
+the toggle applies the `counterpart` the current one names. See the family
+table above.
+
+**"The system" is one specific thing:** `org.gnome.desktop.interface`'s
+`color-scheme` key. That is the freedesktop light/dark preference on Linux —
+the XDG desktop portal serves it as `org.freedesktop.appearance color-scheme`,
+and GTK4, libadwaita, Electron, Firefox and Qt6 all read it from there. In
+`dark` or `light` this desktop *writes* that key, so apps this repo doesn't
+theme follow along; in `auto` it reads it instead and leaves it alone, so
+anything that can set it — a settings panel, a plain `dconf write`, a script
+on a schedule — decides what the desktop wears. The value `default`, which the
+key holds when nobody has expressed a preference, is not "light" and isn't
+treated as one; it falls back to the default palette's mode.
+
+`gtk-theme` and `icon-theme` are written alongside it in both cases —
+Adwaita/Adwaita-dark and Papirus-Light/Papirus-Dark. They aren't the
+freedesktop preference, but a light session with dark widgets and dark folder
+icons is not a light session. Two consequences worth knowing:
+
+- **GTK3 does not follow.** It reads `~/.config/gtk-3.0/settings.ini`, which
+  home-manager owns as a read-only symlink into the store, and there is no
+  XSettings daemon in a niri session to override it. GTK3 apps keep the
+  build-time Adwaita-dark. GTK4 and libadwaita go through the portal and
+  change in place.
+- **A rebuild resets those two keys.** home-manager's `gtk` module owns them
+  declaratively and writes its build-time values into dconf on every
+  activation. A user service, `niri-theme-auto`, holds a `dconf watch` on
+  `/org/gnome/desktop/interface/` and puts them back — which is the same watch
+  that makes `auto` work at all. It writes only values that differ, so it
+  can't wake itself.
+
+`color-scheme` itself is deliberately **not** declared in
+`home/joshr/niri/default.nix` any more. It used to be pinned to
+`prefer-dark`, which is right for twenty-nine palettes and wrong for
+twenty-two, and a declared value would either fight `auto` or make it
+meaningless.
+
+One piece of state exists only for this. `theme-apply` writes the palette it
+applied to `~/.local/state/niri-theme/selected`, which is *not* `current`:
+under noctalia the shell owns `current` and writes `noctalia-live` into it —
+deliberately, because a palette derived from a wallpaper has no name — so
+there would be nothing there to find a counterpart for. The honest cost is
+that changing the palette from noctalia's own settings panel rather than
+through `theme-apply` leaves `selected` stale, so the next toggle moves to the
+counterpart of the palette you last picked *here*. That is the same limitation
+everything outside the shell has under noctalia, and the fix in every case is
+to pick through the menu.
+
+**Noctalia's own dark/light switch stays a no-op**, and that is still right.
+`noctalia-palettes.nix` writes the same colours into both variants of every
+generated palette so that the palette you chose is the palette you get.
+Filling the two slots with a family's two halves instead was the obvious
+alternative and doesn't work: `theme-apply` would then have to set
+`theme.mode` as well as the palette, or picking `gruvbox-light` by name while
+the shell sat in dark mode would silently hand back `gruvbox`.
 
 ### Theme sync under noctalia
 
@@ -1605,7 +1753,8 @@ restart Spotify so the new launcher supplies the mount.
 | `Mod+Escape` | blank the monitors — works on the lock screen too |
 | `Mod+Shift+I` | stay awake — toggle the idle inhibitor |
 | `Mod+G` | GameMode — animations, blur, transparency and monitoring off |
-| `Mod+Ctrl+T` | pick a theme |
+| `Mod+Ctrl+T` | pick a theme, or the light/dark mode |
+| `Mod+Shift+T` | toggle light/dark |
 | `Mod+Ctrl+W` | pick a wallpaper |
 | volume / brightness keys | change it and show an OSD — see "The on-screen display" |
 | `Mod+P` / `Mod+Ctrl+P` | next / previous power profile — the OSD follows the daemon |

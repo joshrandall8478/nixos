@@ -15,7 +15,7 @@
 # --------------------------------
 # A Spicetify build is immutable — `mkSpicetify` patches Spotify's xpui bundle
 # in a derivation, so the colours are baked in. The way that was reconciled
-# with a runtime theme switcher was to build *every* palette: thirty-odd
+# with a runtime theme switcher was to build *every* palette: fifty-odd
 # Spotify packages, and a launcher that read `~/.local/state/niri-theme/current`
 # and `exec`d whichever one matched.
 #

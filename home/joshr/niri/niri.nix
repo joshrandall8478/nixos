@@ -68,9 +68,9 @@ let
   #
   # Only the binds that talk to the shell are here. Window management, the
   # workspace keys and the screenshot binds are the compositor's own actions
-  # and are the same under both — as is Mod+Ctrl+T, which goes through
-  # `theme-apply` either way (it is the switcher that knows how to tell each
-  # shell; see scripts.nix).
+  # and are the same under both — as are Mod+Ctrl+T and Mod+Shift+T, which go
+  # through `theme-apply` either way (it is the switcher that knows how to
+  # tell each shell; see scripts.nix).
   useNoctalia = config.local.niri.shell == "noctalia";
 
   # `pkgs.noctalia` and not `pkgs.noctalia-shell`: nixpkgs carries both majors
@@ -735,7 +735,15 @@ ${debugBlock}
         // silently replaced whatever you had chosen. `theme-random`,
         // `theme-cycle` and `wallpaper-random` are all still on PATH for when
         // that is actually what you want.
-        // Mod+Ctrl+T  hotkey-overlay-title="Choose theme" { spawn "${bin niriScripts.themeMenu}"; }
+        //
+        // Mod+Shift+T is the light/dark toggle, and is the one place a
+        // Mod+Shift neighbour of a picker is safe: it has two states and
+        // pressing it twice puts you back exactly where you were, so a slip
+        // costs nothing. The same three states are rows at the top of the
+        // picker, which is where "match the system" lives — a third state
+        // has no business on a toggle.
+        Mod+Ctrl+T  hotkey-overlay-title="Choose theme" { spawn "${bin niriScripts.themeMenu}"; }
+        Mod+Shift+T hotkey-overlay-title="Toggle light/dark theme" { spawn "${bin niriScripts.themeMode}" "toggle"; }
         Mod+Ctrl+W  hotkey-overlay-title="Choose wallpaper" { spawn-sh "${wallpaperMenu}"; }
 
         // --- screenshots -----------------------------------------------

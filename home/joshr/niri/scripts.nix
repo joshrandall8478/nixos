@@ -14,6 +14,7 @@
 # runtime.
 let
   inherit (niriTheming)
+    themeSet
     themes
     themeDirs
     stateDir
@@ -178,16 +179,191 @@ let
     lib.mapAttrsToList (n: d: ''${n}) target="${d}" ;;'') themeDirs
   );
 
-  # Every palette in themes.nix, one per line, for the menu and the cycle.
+  # Every palette in themes.nix, split by light and dark — which is the only
+  # form anything wants it in.
   #
-  # This used to filter out a `noctalia-*` prefix: theme-set.nix carried a
-  # hand-transcribed copy of noctalia's own builtin palettes, so that the
-  # greeter and the boot menu could be given a prebuilt match when the shell
-  # was switched to one of them. Nothing ever selected them — the shell writes
-  # `noctalia-live` to `current`, not a builtin's name — and both consumers
-  # read the shell's resolved manifest now, so the copy and the filter are
-  # gone together.
-  themeNames = lib.concatStringsSep "\n" (lib.attrNames themes);
+  # There used to be one flat list here, and a filter on it that dropped a
+  # `noctalia-*` prefix: theme-set.nix carried a hand-transcribed copy of
+  # noctalia's own builtin palettes, so that the greeter and the boot menu
+  # could be given a prebuilt match when the shell was switched to one of
+  # them. Nothing ever selected them — the shell writes `noctalia-live` to
+  # `current`, not a builtin's name — and both consumers read the shell's
+  # resolved manifest now, so the copy and the filter are gone together.
+  #
+  # The split is what everything that offers a choice actually wants. A
+  # picker that mixes the light and the dark palettes makes the light/dark
+  # preference meaningless — you would set it and then undo it with the next
+  # pick — and a *random* jump across the divide is worse still, since the
+  # one thing you can be sure of about the room you are in is that it has not
+  # changed since the last keypress.
+  namesInMode = m: lib.attrNames (lib.filterAttrs (_: t: t.mode == m) themes);
+  darkNames = lib.concatStringsSep "\n" (namesInMode "dark");
+  lightNames = lib.concatStringsSep "\n" (namesInMode "light");
+
+  # The mode a fresh session starts in: whatever the default palette is.
+  defaultTheme = themeSet.default;
+  defaultMode = themes.${defaultTheme}.mode;
+
+  # `name) field="value" ;;` arms, at the indentation the case statements
+  # below sit at.
+  caseArms =
+    f:
+    lib.concatStringsSep "\n" (lib.mapAttrsToList (n: t: "          ${n}) ${f t} ;;") themes);
+  themeModeCases = caseArms (t: ''mode="${t.mode}"'');
+  themeCounterpartCases = caseArms (t: ''counter="${t.counterpart}"'');
+
+  # The menu's rows: the palette's id, which is what the switcher speaks, and
+  # its description, which is what tells two dark blues apart at a glance.
+  menuRows =
+    names:
+    lib.escapeShellArgs (map (n: "${n} — ${themes.${n}.description}") names);
+  darkRows = menuRows (namesInMode "dark");
+  lightRows = menuRows (namesInMode "light");
+  allRows = menuRows (lib.attrNames themes);
+
+  # --- the light/dark preference, and the two files that hold it ----------
+  #
+  # `~/.local/state/niri-theme/mode` is "dark", "light" or "auto", and it is
+  # a *preference*, not a state: in "auto" it says nothing about what is on
+  # screen, only that the answer comes from somewhere else.
+  #
+  # `~/.local/state/niri-theme/selected` is the palette this switcher last
+  # applied. It exists because `current` cannot answer the question under
+  # both shells: under noctalia the shell owns that file and writes
+  # `noctalia-live` into it — deliberately, because a palette derived from a
+  # wallpaper has no name — so there would be nothing there to find a
+  # counterpart for. `selected` is written under both shells by `theme-apply`
+  # and nothing else touches it.
+  #
+  # The cost of that under noctalia is honest and small: change the palette
+  # from noctalia's own settings panel rather than through `theme-apply`, and
+  # `selected` is stale, so the next light/dark toggle moves to the
+  # counterpart of the palette you last picked *here*. That is the same
+  # limitation everything outside the shell has under noctalia — see "Theme
+  # sync under noctalia" in MANUAL.md — and the fix in every case is to pick
+  # through the menu.
+  modeState = ''
+    write_state() {
+      # $1 path, $2 contents. Atomic: the SDDM and limine sync units watch
+      # this directory with systemd path units and can fire mid-write, and a
+      # half-written palette name is a greeter with no colours.
+      mkdir -p "${stateDir}"
+      tmp="$(mktemp "$1.XXXXXX")"
+      printf %s "$2" > "$tmp"
+      mv -f "$tmp" "$1"
+    }
+
+    read_pref() {
+      case "$(cat "${stateDir}/mode" 2>/dev/null || true)" in
+        dark) printf dark ;;
+        light) printf light ;;
+        auto) printf auto ;;
+        *) printf %s "${defaultMode}" ;;
+      esac
+    }
+
+    # What the *system* says, which is what "auto" follows.
+    #
+    # org.gnome.desktop.interface color-scheme is the freedesktop light/dark
+    # preference on a Linux desktop: the XDG desktop portal serves it as
+    # org.freedesktop.appearance color-scheme, and GTK4, libadwaita,
+    # Electron, Firefox and Qt6 all read it from there. Reading it rather
+    # than declaring it is the whole point of "auto" — anything that can
+    # write that key, including a settings panel or a plain `dconf write`,
+    # then decides what the desktop wears.
+    #
+    # `default` — the value the key holds when nobody has expressed a
+    # preference — is not "light", and is not treated as one.
+    read_system_mode() {
+      case "$(dconf read /org/gnome/desktop/interface/color-scheme 2>/dev/null || true)" in
+        *prefer-light*) printf light ;;
+        *prefer-dark*) printf dark ;;
+        *) printf %s "${defaultMode}" ;;
+      esac
+    }
+
+    effective_mode() {
+      if [ "$(read_pref)" = auto ]; then read_system_mode; else read_pref; fi
+    }
+
+    read_selected() {
+      sel="$(cat "${stateDir}/selected" 2>/dev/null || true)"
+      [ -n "$sel" ] || sel="${defaultTheme}"
+      printf %s "$sel"
+    }
+
+    # Both of these come out empty for a name that is not a palette, which is
+    # what the callers check.
+    mode_of() {
+      mode=""
+      case "$1" in
+${themeModeCases}
+      esac
+      printf %s "$mode"
+    }
+
+    counterpart_of() {
+      counter=""
+      case "$1" in
+${themeCounterpartCases}
+      esac
+      printf %s "$counter"
+    }
+  '';
+
+  # Publishing the mode to everything this config does not render a palette
+  # for.
+  #
+  # The same key `read_system_mode` above reads, written rather than read:
+  # when the preference is dark or light this desktop *is* the system's
+  # light/dark preference, and GTK4, libadwaita, Electron and Firefox follow
+  # it without any of them being themed here. In "auto" the key is left
+  # alone, because there the desktop is following it and writing it back
+  # would be an argument with whatever set it.
+  #
+  # gtk-theme and icon-theme go with it in both cases. They are not the
+  # freedesktop preference, but a light session with Adwaita-dark widgets and
+  # Papirus-Dark folder icons is not a light session.
+  #
+  # What does *not* follow: GTK3. It reads ~/.config/gtk-3.0/settings.ini,
+  # which home-manager owns as a read-only symlink into the store, and there
+  # is no XSettings daemon in a niri session to override it. GTK3 apps
+  # therefore keep the build-time Adwaita-dark until the next login of a
+  # differently built profile. GTK4 and libadwaita read the portal and change
+  # in place.
+  appearanceIpc = ''
+    dconf_set() {
+      # Only writes when the value differs. `theme-mode --watch` watches this
+      # whole directory rather than the one key — so that it also notices a
+      # home-manager activation resetting gtk-theme underneath it — and an
+      # unconditional write would wake the watcher with its own change.
+      have="$(dconf read "$1" 2>/dev/null || true)"
+      if [ "$have" != "$2" ]; then
+        dconf write "$1" "$2" >/dev/null 2>&1 || true
+      fi
+    }
+
+    # $1: "dark" or "light". $2: "system" when we are following the key
+    # rather than driving it.
+    publish_appearance() {
+      if [ "$1" = light ]; then
+        gtk_theme="Adwaita"
+        icons="Papirus-Light"
+        scheme="'prefer-light'"
+      else
+        gtk_theme="Adwaita-dark"
+        icons="Papirus-Dark"
+        scheme="'prefer-dark'"
+      fi
+
+      dconf_set /org/gnome/desktop/interface/gtk-theme "'$gtk_theme'"
+      dconf_set /org/gnome/desktop/interface/icon-theme "'$icons'"
+
+      if [ "''${2:-}" != system ]; then
+        dconf_set /org/gnome/desktop/interface/color-scheme "$scheme"
+      fi
+    }
+  '';
 
   # Apply a theme by name: repoint the symlink, then reload consumers.
   #
@@ -258,12 +434,22 @@ let
         systemd
         procps
         dbus
+        dconf
       ])
       ++ shellApplyInputs;
     text = ''
+      ${modeState}
+      ${appearanceIpc}
+
+      keep_mode=""
+      if [ "''${1:-}" = "--keep-mode" ]; then
+        keep_mode=1
+        shift
+      fi
+
       name="''${1:-}"
       if [ -z "$name" ]; then
-        echo "usage: theme-apply <name>" >&2
+        echo "usage: theme-apply [--keep-mode] <name>" >&2
         exit 2
       fi
 
@@ -286,13 +472,33 @@ let
           ''
             mkdir -p "${stateDir}"
             ln -sfn "$target" "${activeDir}"
-            current_tmp="$(mktemp "${stateDir}/current.XXXXXX")"
-            trap 'rm -f "$current_tmp"' EXIT
-            printf %s "$name" > "$current_tmp"
-            mv -f "$current_tmp" "${stateDir}/current"
-            trap - EXIT
+            write_state "${stateDir}/current" "$name"
           ''
       }
+
+      # Which palette the switcher is on, under either shell. See the note on
+      # `modeState` for why this is not `current`.
+      write_state "${stateDir}/selected" "$name"
+
+      theme_mode="$(mode_of "$name")"
+
+      # An explicit pick decides the light/dark preference too. Choosing
+      # `gruvbox` from the menu while the session is in light mode means you
+      # want the dark one, and leaving the preference on "light" would have
+      # the next toggle — or, in "auto", the next thing that touches the
+      # system key — quietly undo the choice you just made.
+      #
+      # --keep-mode is for the one caller that is *implementing* a mode
+      # change rather than making one: `theme-mode` has already written the
+      # preference and is applying the counterpart that follows from it.
+      if [ -z "$keep_mode" ]; then
+        write_state "${stateDir}/mode" "$theme_mode"
+        publish_appearance "$theme_mode"
+      elif [ "$(read_pref)" = auto ]; then
+        publish_appearance "$theme_mode" system
+      else
+        publish_appearance "$theme_mode"
+      fi
 
       ${shellApplyTheme}
 
@@ -318,13 +524,125 @@ let
     '';
   };
 
-  # Cycle to the next theme in the list, wrapping around. Bound to a key.
+  # Set, or follow, the session's light/dark preference.
+  #
+  # A mode here is not a second palette dimension the way it is in a shell
+  # that computes its own colours. Every palette in themes.nix is finished
+  # and is already either light or dark, so switching modes means switching
+  # *palettes*: to the `counterpart` the current one names. `gruvbox` toggles
+  # to `gruvbox-light` and back; `gruvbox-hard` toggles to `gruvbox-light`
+  # and comes back to plain `gruvbox`, because a family with three dark
+  # contrasts still has to have one canonical answer. See the header of
+  # themes.nix.
+  #
+  #   theme-mode dark|light   pick one and stay there
+  #   theme-mode auto         follow the system's own preference
+  #   theme-mode toggle       the other one of dark/light; leaves auto
+  #   theme-mode status       the preference, then what it resolves to
+  #   theme-mode --watch      the long-running half of "auto"; see the unit
+  #                           at the bottom of this file
+  #
+  # Under noctalia this works without any new IPC: the counterpart is a
+  # palette id like any other, so `theme-apply` hands it to
+  # `color-scheme-set custom` exactly as it does for a manual pick. Noctalia's
+  # *own* dark/light switch stays a no-op — ./noctalia-palettes.nix writes
+  # the same colours into both variants of every generated palette on purpose,
+  # so that a palette you chose is the palette you get — and this is the
+  # switch that means something here.
+  themeMode = pkgs.writeShellApplication {
+    name = "theme-mode";
+    runtimeInputs = with pkgs; [
+      coreutils
+      dconf
+      themeApply
+    ];
+    text = ''
+      ${modeState}
+      ${appearanceIpc}
+
+      # Bring the session in line with whatever the preference now resolves
+      # to. Idempotent, which is what makes it safe to call from the watch
+      # loop on every change: if the active palette is already the right way
+      # up, this only republishes, and `dconf_set` will not write a value
+      # that is already there.
+      sync_mode() {
+        want="$(effective_mode)"
+        sel="$(read_selected)"
+        have="$(mode_of "$sel")"
+        counter="$(counterpart_of "$sel")"
+
+        if [ -n "$have" ] && [ "$have" != "$want" ] && [ -n "$counter" ]; then
+          theme-apply --keep-mode "$counter"
+          return 0
+        fi
+
+        if [ "$(read_pref)" = auto ]; then
+          publish_appearance "$want" system
+        else
+          publish_appearance "$want"
+        fi
+      }
+
+      set_pref() {
+        write_state "${stateDir}/mode" "$1"
+        sync_mode
+      }
+
+      case "''${1:-status}" in
+        dark | light | auto)
+          set_pref "$1"
+          ;;
+        toggle)
+          if [ "$(effective_mode)" = dark ]; then set_pref light; else set_pref dark; fi
+          ;;
+        status)
+          printf '%s\t%s\n' "$(read_pref)" "$(effective_mode)"
+          ;;
+        --watch)
+          # The whole directory rather than the one key, so that a
+          # home-manager activation resetting gtk-theme and icon-theme
+          # underneath us is noticed too — those are written by
+          # home-manager's own gtk module on every `nixos-rebuild switch`,
+          # and without this they would stay wrong until the next login.
+          #
+          # This does not feed back on itself: `dconf_set` writes only when
+          # the value differs, so the writes this loop makes in response to a
+          # change either are the change or do not happen.
+          sync_mode
+          dconf watch /org/gnome/desktop/interface/ | while read -r _; do
+            sync_mode
+          done
+          ;;
+        *)
+          echo "usage: theme-mode [dark|light|auto|toggle|status|--watch]" >&2
+          exit 2
+          ;;
+      esac
+    '';
+  };
+
+  # Cycle to the next theme, wrapping around. Bound to nothing; still on
+  # PATH.
+  #
+  # Within the current mode: see `namesInMode` above for why every chooser
+  # here stays on one side of the light/dark line.
   themeCycle = pkgs.writeShellApplication {
     name = "theme-cycle";
-    runtimeInputs = [ themeApply ];
+    runtimeInputs = with pkgs; [
+      coreutils
+      dconf
+      themeApply
+    ];
     text = ''
-      themes="${themeNames}"
-      current="$(cat "${stateDir}/current" 2>/dev/null || echo "")"
+      ${modeState}
+
+      if [ "$(effective_mode)" = light ]; then
+        themes="${lightNames}"
+      else
+        themes="${darkNames}"
+      fi
+
+      current="$(read_selected)"
 
       next="$(echo "$themes" | awk -v cur="$current" '
         { list[NR] = $0 }
@@ -337,52 +655,147 @@ let
     '';
   };
 
-  # Jump to a random theme. This is what Mod+Shift+T runs.
+  # Jump to a random theme, within the current mode.
   #
-  # The current theme is excluded from the draw, so the key always visibly
-  # does something. With 29 palettes a plain random pick would land on the
-  # one already active about one press in twenty-nine, and a keybind that
-  # occasionally appears to do nothing reads as broken rather than as chance.
+  # The current theme is excluded from the draw, so this always visibly does
+  # something: a plain random pick over a couple of dozen palettes lands on
+  # the one already active often enough to read as broken rather than as
+  # chance.
   #
-  # themeCycle above is still built and still on PATH as `theme-cycle`; it
-  # just isn't bound to anything any more. This mirrors the wallpaper keys —
-  # Mod+Shift+W is random, Mod+Ctrl+W picks — so the two pairs now behave the
-  # same way.
+  # Bound to nothing. The Mod+Shift halves of the theme and wallpaper pairs
+  # were removed because Mod+Shift+W is one slip from Mod+Ctrl+W and the slip
+  # silently replaced whatever you had chosen; `theme-random`, `theme-cycle`
+  # and `wallpaper-random` are all still here for when that is genuinely what
+  # you want.
   themeRandom = pkgs.writeShellApplication {
     name = "theme-random";
     runtimeInputs = with pkgs; [
       coreutils
+      dconf
       gnugrep
       themeApply
     ];
     text = ''
-      current="$(cat "${stateDir}/current" 2>/dev/null || echo "")"
+      ${modeState}
+
+      if [ "$(effective_mode)" = light ]; then
+        themes="${lightNames}"
+      else
+        themes="${darkNames}"
+      fi
+
+      current="$(read_selected)"
 
       # -x so a name can't match as a substring of another, -F so nothing in
       # a theme name is read as a pattern. `|| true` because grep exits 1 when
       # it selects nothing, which under pipefail would abort the script.
-      pick="$(printf '%s\n' "${themeNames}" \
+      pick="$(printf '%s\n' "$themes" \
                 | grep -vxF -- "$current" \
                 | shuf -n1 || true)"
 
-      # Only reachable if themes.nix defines exactly one theme, in which case
-      # there is nothing to switch to.
+      # Only reachable if the current mode holds exactly one palette, in
+      # which case there is nothing to switch to.
       [ -n "$pick" ] || exit 0
 
       theme-apply "$pick"
     '';
   };
 
-  # Pick a theme from a wofi menu.
+  # Pick a theme, or a mode, from a wofi menu. Mod+Ctrl+T.
+  #
+  # Three things about the shape of it:
+  #
+  # The mode rows come first and are radio buttons, not a toggle. "Match the
+  # system" is a third state and not a variant of the other two, and a single
+  # toggle row could not show which of the three you are in — which matters
+  # most for `auto`, where the palette on screen tells you what the system
+  # said and nothing tells you that it was the system that said it.
+  #
+  # The list under them is only the palettes in the current mode. Picking one
+  # from the other side is still possible — the last row opens the whole set
+  # — and doing so moves the preference with it, because an explicit pick is
+  # an explicit pick. See the --keep-mode note in `theme-apply`.
+  #
+  # And every row carries the palette's description as well as its id. With
+  # fifty-one palettes, a column of bare names is a list of things you have
+  # to already know; `tokyo-night` and `kanagawa` in particular were for a
+  # long time much harder to tell apart in the menu than they are on screen.
   themeMenu = pkgs.writeShellApplication {
     name = "theme-menu";
     runtimeInputs = with pkgs; [
+      coreutils
+      dconf
       wofi
       themeApply
+      themeMode
     ];
     text = ''
-      choice="$(printf '%s\n' ${lib.escapeShellArgs (lib.attrNames themes)} | wofi --dmenu --prompt "Theme" --insensitive)"
-      [ -n "$choice" ] && theme-apply "$choice"
+      ${modeState}
+
+      show_all=0
+
+      while :; do
+        pref="$(read_pref)"
+        eff="$(effective_mode)"
+
+        dark_mark="○"
+        light_mark="○"
+        auto_mark="○"
+        case "$pref" in
+          dark) dark_mark="●" ;;
+          light) light_mark="●" ;;
+          auto) auto_mark="●" ;;
+        esac
+
+        if [ "$show_all" = 1 ]; then
+          rows="$(printf '%s\n' ${allRows})"
+          last_row="≡ Only $eff themes"
+        elif [ "$eff" = light ]; then
+          rows="$(printf '%s\n' ${lightRows})"
+          last_row="≡ Show every theme"
+        else
+          rows="$(printf '%s\n' ${darkRows})"
+          last_row="≡ Show every theme"
+        fi
+
+        choice="$(printf '%s\n' \
+          "$dark_mark Dark" \
+          "$light_mark Light" \
+          "$auto_mark Match the system — currently $eff" \
+          "$rows" \
+          "$last_row" \
+          | wofi --dmenu --prompt "Theme" --insensitive)" || exit 0
+
+        case "$choice" in
+          "")
+            exit 0
+            ;;
+          "$dark_mark Dark")
+            theme-mode dark
+            exit 0
+            ;;
+          "$light_mark Light")
+            theme-mode light
+            exit 0
+            ;;
+          "$auto_mark Match the system"*)
+            theme-mode auto
+            exit 0
+            ;;
+          "≡ Show every theme")
+            show_all=1
+            ;;
+          "≡ Only "*)
+            show_all=0
+            ;;
+          *)
+            # The rows are "<id> — <description>"; no palette id contains a
+            # space, so cutting at the first one recovers the id.
+            theme-apply "''${choice%% *}"
+            exit 0
+            ;;
+        esac
+      done
     '';
   };
 
@@ -4164,6 +4577,7 @@ in
 {
   home.packages = [
     themeApply
+    themeMode
     themeCycle
     themeRandom
     themeMenu
@@ -4198,6 +4612,7 @@ in
   _module.args.niriScripts = {
     inherit
       themeApply
+      themeMode
       themeCycle
       themeRandom
       themeMenu
@@ -4227,5 +4642,39 @@ in
     # lock.nix installs the same build rather than the stock one, which would
     # otherwise put an unpatched `swaylock` on PATH beside it.
     inherit swaylock;
+  };
+
+  # The long-running half of `theme-mode auto`.
+  #
+  # It runs under both shells and whatever the preference is, because it has
+  # two jobs and only one of them is about "auto". The first is to notice the
+  # system's light/dark preference changing and move the palette to match,
+  # which only happens in "auto" — `sync_mode` checks. The second is to
+  # notice `org.gnome.desktop.interface`'s gtk-theme and icon-theme being
+  # reset underneath the session, which happens on every `nixos-rebuild
+  # switch`: home-manager's gtk module owns those two keys declaratively and
+  # writes its build-time values into dconf on activation. Without something
+  # watching, a light session would go back to Adwaita-dark widgets and dark
+  # folder icons at the next rebuild and stay there until the next login.
+  #
+  # `sync_mode` at startup rather than only on change, so a session that
+  # begins with the key already disagreeing lands in the right mode before
+  # anything is drawn.
+  systemd.user.services.niri-theme-auto = {
+    Unit = {
+      Description = "Follow the system light/dark preference";
+      PartOf = [ "graphical-session.target" ];
+      After = [ "graphical-session.target" ];
+    };
+    Service = {
+      Type = "simple";
+      ExecStart = "${lib.getExe themeMode} --watch";
+      # `dconf watch` exits if the session bus goes away, which on this
+      # desktop means the session is going away too — but a restart costs
+      # nothing and a watcher that has quietly died is invisible.
+      Restart = "on-failure";
+      RestartSec = 5;
+    };
+    Install.WantedBy = [ "graphical-session.target" ];
   };
 }
