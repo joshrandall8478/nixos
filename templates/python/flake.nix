@@ -85,35 +85,53 @@
           # itself happens to be running on, so it reads a 3.12 project
           # correctly while running on 3.14. The version above stays a free
           # choice.
-          pylsp = pkgs.python3Packages.python-lsp-server;
+          #
+          # It goes in as a one-line script that execs it, rather than as the
+          # package itself, and that part is about the venv. nixpkgs propagates
+          # a Python package's interpreter and libraries into any shell that
+          # lists it, and that interpreter's setup hook then puts every one of
+          # those libraries on PYTHONPATH. Listed directly, pylsp brought all
+          # of its own — jedi, black, setuptools and a dozen more, built for
+          # 3.14 — into the project's 3.13 interpreter, so they could be
+          # imported without being installed, and pip calls anything on that
+          # path already satisfied and leaves it out of .venv. A project would
+          # then run here and nowhere else. A script carries none of that; the
+          # shell gets the command and nothing behind it.
+          pylsp = pkgs.writeShellScriptBin "pylsp" ''
+            exec ${pkgs.python3Packages.python-lsp-server}/bin/pylsp "$@"
+          '';
         in
         {
           default = pkgs.mkShell {
             packages = [
               python
-              pkgs.uv # resolver and venv manager; `pip` also works
+              pkgs.uv # optional; only a project with a uv.lock needs it
               pkgs.ruff # linter + formatter
               pylsp
             ];
 
-            # Point uv at the interpreter above and stop it reaching for its
-            # own. Left alone, uv downloads a standalone CPython the first time
-            # it wants one — a fetch on the critical path, and a different
-            # Python from the one pinned here, which rather defeats pinning it.
-            env = {
-              UV_PYTHON = "${python}/bin/python";
-              UV_PYTHON_DOWNLOADS = "never";
-            };
+            # Stop uv fetching a CPython of its own the first time it wants one
+            # — a download on the critical path, and a different Python from the
+            # one pinned here. Which interpreter it does use is set in the hook
+            # below, where the venv's path is known.
+            env.UV_PYTHON_DOWNLOADS = "never";
 
             shellHook = ''
-              # A venv, so pip/uv installs land in the project rather than
-              # trying to write into the read-only store. Nix supplies the
-              # interpreter; PyPI supplies the libraries.
+              # A venv, so installs land in the project rather than trying to
+              # write into the read-only store. Nix supplies the interpreter;
+              # PyPI supplies the libraries.
               #
               # If you'd rather have every dependency come from nixpkgs instead,
               # delete this hook and list them as `python.withPackages (ps: [
               # ps.requests ps.numpy ])` in packages above — reading the note on
               # built package sets by `python` first.
+              #
+              # Made by Python's own `-m venv`, which seeds pip into it from a
+              # wheel that ships inside the interpreter: no network, and no uv.
+              # `uv venv`, which this used to call, leaves pip out, and in a venv
+              # without one `pip install` either isn't found or finds some other
+              # pip further down PATH — which installs into that pip's own
+              # Python, or into ~/.local, or nowhere, but never here.
               #
               # Rebuilt when it doesn't answer with the interpreter above. A
               # venv records an absolute path to the Python that made it, so
@@ -129,19 +147,43 @@
               # -rf` here only ever runs on one that couldn't be used anyway.
               if [ "$(.venv/bin/python -V 2>/dev/null)" != "$(${python}/bin/python -V)" ]; then
                 rm -rf .venv
-                uv venv --python "${python}/bin/python" .venv
+                ${python}/bin/python -m venv .venv
+              fi
+              # A venv `uv venv` made passes the check above with no pip in it,
+              # and ensurepip adds one in place rather than starting over.
+              if [ ! -e .venv/bin/pip ]; then
+                .venv/bin/python -m ensurepip --default-pip >/dev/null
               fi
               source .venv/bin/activate
+
+              # uv reads UV_PYTHON as its --python flag, and to `uv pip` that
+              # flag means the interpreter to install into. It used to name the
+              # store interpreter above, so every `uv pip install` in this shell
+              # aimed at /nix/store and was refused as externally managed. Naming
+              # the venv's own interpreter sends `uv pip`, `uv sync`, `uv add` and
+              # `uv run` all to .venv, and still keeps uv off every other Python
+              # on the machine — one a `.python-version` file asks for included.
+              export UV_PYTHON="$VIRTUAL_ENV/bin/python"
+
+              # Anything on PYTHONPATH is importable from the venv without being
+              # installed in it. pylsp's libraries used to arrive that way (see
+              # its note above), and any Python library added to `packages` would
+              # do the same, so it's cleared: .venv is the one place this
+              # project's imports come from.
+              unset PYTHONPATH
 
               # The libraries that venv is for, installed on the way in, so a
               # fresh clone is ready to run rather than ready to be set up.
               #
-              # Which files count is uv's own division and not a guess: a
-              # uv.lock, or a pyproject.toml with a [project] table, is a
-              # packaged project, and `uv sync` installs precisely what the lock
-              # says (writing the lock first if it isn't there). Anything else
-              # is requirements files, and they go in together in one resolve so
-              # a dev pin can't quietly contradict the runtime one.
+              # With the venv's own pip, unless the project has a uv.lock. Only
+              # uv reads one, and a project that commits one has already chosen
+              # uv, so `uv sync` installs exactly what it says — into this same
+              # .venv, leaving pip in place. Otherwise a pyproject.toml with a
+              # [project] table is a packaged project, installed editable along
+              # with everything it declares (extras and dependency groups are
+              # yours to ask for: `pip install -e '.[dev]'`, `--group dev`).
+              # Anything else is requirements files, and they go in together in
+              # one resolve so a dev pin can't quietly contradict the runtime one.
               #
               # The stamp inside the venv is what makes this cheap enough to sit
               # in a hook that runs at every prompt: touched only after an
@@ -161,12 +203,19 @@
               done
 
               if [ -n "$stale" ] && [ -z "''${DEV_NO_INSTALL:-}" ]; then
-                if [ -f uv.lock ] || grep -qs '^\[project\]' pyproject.toml; then
+                if [ -f uv.lock ]; then
                   echo "installing dependencies with uv sync..."
                   if uv sync; then
                     touch "$stamp"
                   else
                     echo "uv sync failed; the shell is still here. Fix it and rerun it by hand." >&2
+                  fi
+                elif grep -qs '^\[project\]' pyproject.toml; then
+                  echo "installing the project and its dependencies with pip..."
+                  if python -m pip install -e .; then
+                    touch "$stamp"
+                  else
+                    echo "pip install -e . failed; the shell is still here. Fix it and rerun it by hand." >&2
                   fi
                 else
                   args=()
@@ -177,10 +226,10 @@
                   done
                   if [ ''${#args[@]} -gt 0 ]; then
                     echo "installing dependencies from the requirements files..."
-                    if uv pip install "''${args[@]}"; then
+                    if python -m pip install "''${args[@]}"; then
                       touch "$stamp"
                     else
-                      echo "uv pip install failed; the shell is still here. Fix it and rerun it by hand." >&2
+                      echo "pip install failed; the shell is still here. Fix it and rerun it by hand." >&2
                     fi
                   fi
                 fi

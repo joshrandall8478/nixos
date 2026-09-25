@@ -409,8 +409,8 @@
       # and the shells they build are updated by the same `nix flake update`.
       #
       # Each language template's shellHook also installs the project's own
-      # dependencies on the way in — npm install, uv sync or a requirements
-      # file, go mod download, cargo fetch, dotnet restore, Maven or Gradle,
+      # dependencies on the way in — npm install, pip install (uv sync for a
+      # uv.lock), go mod download, cargo fetch, dotnet restore, Maven or Gradle,
       # gleam deps download, zig build --fetch — guarded by a stamp file so
       # an ordinary entry costs no subprocess at all, and by DEV_NO_INSTALL=1
       # for a project whose dependencies are being managed by hand. Nix
@@ -441,7 +441,7 @@
 
         python = {
           path = ./templates/python;
-          description = "Python 3.13 with uv, ruff and a project-local venv";
+          description = "Python 3.13 with ruff and a project-local venv with pip in it";
           welcomeText = ''
             Nix supplies the interpreter and tooling; the venv created by the
             shellHook supplies the libraries, installed on entry from

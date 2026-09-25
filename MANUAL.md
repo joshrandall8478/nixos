@@ -4201,7 +4201,7 @@ be set up:
 | template | what runs | when |
 |---|---|---|
 | node | `npm install` — or `pnpm`/`yarn`, whichever lockfile is committed | `package.json` or a lockfile is newer than the stamp, or `node_modules` is gone |
-| python | `uv sync` for a `uv.lock` or a pyproject with a `[project]` table; otherwise `uv pip install -r requirements.txt`, and `requirements-dev.txt` beside it if it exists | any of those is newer than the stamp, or the venv was rebuilt |
+| python | the venv's own pip: `pip install -e .` for a pyproject with a `[project]` table, otherwise `pip install -r requirements.txt`, and `requirements-dev.txt` beside it if it exists; `uv sync` instead for a project that commits a `uv.lock` | any of those is newer than the stamp, or the venv was rebuilt |
 | go | `go mod download` | `go.mod` or `go.sum` is newer than the stamp |
 | rust | `cargo fetch` | `Cargo.toml` or `Cargo.lock` is newer than the stamp |
 | dotnet | `dotnet restore` | a root-level `.sln`/`.slnx`/`.csproj`/`.fsproj`/`.vbproj`, `Directory.Packages.props`, `Directory.Build.props`, `global.json`, `nuget.config` or `packages.lock.json` is newer than the stamp |
@@ -4226,6 +4226,31 @@ subprojects are resolved at the first real build. Its report is a few hundred
 lines of dependency tree, so the template sends stdout to `/dev/null` and
 leaves stderr alone, which is why a Gradle failure still says why.
 
+The python template's venv is Python's own `-m venv`, so it carries pip from
+the moment it exists — seeded from a wheel that ships inside the interpreter,
+with no network and no uv — and `pip install` in the shell lands in `.venv`
+the way it would in any other venv. A venv left over from the old template,
+which `uv venv` made without pip, has one added in place by `ensurepip` rather
+than being rebuilt. uv is still on `PATH`, and still what runs for a project
+that commits a `uv.lock`, since nothing else reads one; the shell points
+`UV_PYTHON` at the venv's interpreter, which sends `uv pip`, `uv sync` and `uv
+add` to `.venv` as well. It used to point it at the store interpreter, and `uv
+pip` reads that variable as *the interpreter to install into* — so every `uv
+pip install` in the shell, the requirements-file install on the way in
+included, was refused as a write to `/nix/store`.
+
+The venv is also the only place the project's imports come from. nixpkgs
+propagates a Python package's interpreter and libraries into any shell that
+lists it, and that interpreter's setup hook puts the libraries on
+`PYTHONPATH`. pylsp, listed directly, put its whole closure there — jedi,
+black, setuptools and a dozen more, built for 3.14 — where the project's 3.13
+venv could import them without ever declaring them, and where pip counts
+anything it finds as already installed and leaves it out of `.venv`. A project
+that works in that shell can then fail on the first machine that isn't it. The
+template now puts pylsp on `PATH` through a one-line wrapper script that
+carries none of that, and the hook clears `PYTHONPATH` as well, so a Python
+library added to `packages` later can't reopen it.
+
 The stamp is an empty `.dev-shell-deps`, written inside the directory the tool
 already owns — `node_modules/`, `.venv/`, `.go/`, `target/`, `.nuget/`,
 `.m2/`, `.gradle-home/`, `build/`, `.zig-global-cache/`, all of them already
@@ -4247,8 +4272,8 @@ Three deliberate limits:
 - **A failure is a message, not a closed door.** An install that can't reach
   the network says so and leaves the shell open with the toolchain on `PATH`,
   which is the state you want to be in to debug it. The python template's
-  `uv venv` is the one exception, and only because a venv that doesn't exist
-  has nothing to activate.
+  `python -m venv` is the one exception, and only because a venv that doesn't
+  exist has nothing to activate.
 - **`DEV_NO_INSTALL=1` turns it off**, for one shell or exported for good, for
   a project whose dependencies are being managed by hand.
 
@@ -4382,7 +4407,9 @@ that before returning a prompt, and did it again after every `nix flake
 update`. It now takes pylsp from `python3Packages`, which is always the
 default and always built, and leaves the project's interpreter a free choice:
 jedi resolves completions from `$VIRTUAL_ENV`, so a language server running on
-3.14 reads a 3.12 venv correctly.
+3.14 reads a 3.12 venv correctly. It reaches `PATH` through a wrapper script
+rather than as the package, for a reason that has nothing to do with speed —
+[Dependencies, on the way in](#dependencies-on-the-way-in) has it.
 
 When a shell is unexpectedly slow, this says what it's about to do:
 

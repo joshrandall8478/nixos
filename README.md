@@ -117,11 +117,11 @@ The language templates go a step further than putting the toolchain on `PATH`:
 entering the shell also installs the project's own dependencies, so a fresh
 clone is ready to run. `npm install` when `node_modules` is missing or
 `package.json` moved (`pnpm` or `yarn` if that's the committed lockfile),
-`uv sync` or `uv pip install -r requirements.txt`, `go mod download`,
-`cargo fetch`, `dotnet restore`, `mvn dependency:go-offline` or its Gradle
-equivalent, `gleam deps download`, `zig build --fetch`. A stamp file keeps an
-ordinary `cd` free of all of it, `DEV_NO_INSTALL=1` turns it off, and a failed
-install is a message rather than a shell that won't open —
+`pip install` into the project's own `.venv` (`uv sync` for a `uv.lock`),
+`go mod download`, `cargo fetch`, `dotnet restore`, `mvn dependency:go-offline`
+or its Gradle equivalent, `gleam deps download`, `zig build --fetch`. A stamp
+file keeps an ordinary `cd` free of all of it, `DEV_NO_INSTALL=1` turns it
+off, and a failed install is a message rather than a shell that won't open —
 [Dependencies, on the way in](MANUAL.md#dependencies-on-the-way-in).
 
 Each one starts on the newest toolchain nixpkgs builds, which is often not the
